@@ -16,7 +16,11 @@ jobs:
       - name: Prepare disposable test runtime
         run: |
           npm install --prefix "$RUNNER_TEMP/codex-runtime" @openai/codex@0.154.0
-          echo "CODEX_TASKS_TEST_CODEX=$RUNNER_TEMP/codex-runtime/node_modules/.bin/codex" >> "$GITHUB_ENV"
+          # The isolated test PATH deliberately excludes Node and the npm wrapper.
+          mapfile -t binaries < <(find "$RUNNER_TEMP/codex-runtime/node_modules/@openai/codex-linux-x64" -type f -name codex)
+          test "${#binaries[@]}" -eq 1
+          test -x "${binaries[0]}"
+          echo "CODEX_TASKS_TEST_CODEX=${binaries[0]}" >> "$GITHUB_ENV"
       - name: Validate runtime version
         run: test "$("$CODEX_TASKS_TEST_CODEX" --version)" = 'codex-cli 0.154.0'
       - run: go test ./... -count=1
