@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codex Tasks"
+  short_description: "Manage remote Codex tasks and inspect command activity"
+  default_prompt: "Use $codex-tasks to inspect and coordinate the requested Codex tasks."
