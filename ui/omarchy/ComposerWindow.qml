@@ -34,8 +34,8 @@ import qs.Ui
         spacing:Style.space(16)
         Row {
           width:parent.width
-          Text { width:parent.width-Style.space(36);text:"New remote task";color:Color.popups.text;font.family:Style.font.family;font.pixelSize:Style.space(20);font.bold:true }
-          Button { text:"×";width:Style.space(32);enabled:!root.busy;onClicked:root.dismiss() }
+          Text { width:parent.width-Style.space(40);text:"New remote task";color:Color.popups.text;font.family:Style.font.family;font.pixelSize:Style.space(20);font.bold:true;anchors.verticalCenter:parent.verticalCenter }
+          Button { text:"×";fontSize:Style.space(26);width:Style.space(40);height:width;bordered:true;focusable:true;tooltipText:"Close (Esc)";enabled:!root.busy;onClicked:root.dismiss() }
         }
         Row {
           width:parent.width;spacing:Style.space(12);enabled:!root.busy && !root.uncertain
@@ -76,9 +76,18 @@ import qs.Ui
         }
         Row {
           width:parent.width;spacing:Style.space(10)
-          Text { width:parent.width-Style.space(root.taskId?225:100);text:"Enter to send · Shift+Enter for a new line";color:Qt.alpha(Color.popups.text,0.6);font.family:Style.font.family;font.pixelSize:Style.space(12);anchors.verticalCenter:parent.verticalCenter }
-          Button { visible:root.taskId!=="";text:"Open task";onClicked:root.openTask() }
-          Button { text:root.busy?"Sending…":"Send";enabled:root.canSend;onClicked:root.send() }
+          Text { width:parent.width-sendButton.width-parent.spacing-(openButton.visible?openButton.width+parent.spacing:0);text:"Enter to send · Shift+Enter for a new line";color:Qt.alpha(Color.popups.text,0.6);font.family:Style.font.family;font.pixelSize:Style.space(12);wrapMode:Text.Wrap;anchors.verticalCenter:parent.verticalCenter }
+          Button { id:openButton;visible:root.taskId!=="";text:"Open task";bordered:true;focusable:true;enabled:!root.busy;onClicked:root.openTask() }
+          Button {
+            id:sendButton
+            text:root.busy?"Sending…":"Send"
+            width:Style.space(100);height:Style.space(40)
+            bordered:true;focusable:true
+            foreground:Color.accent
+            background:Qt.alpha(Color.accent,enabled?0.18:0.08)
+            opacity:enabled?1:0.55
+            enabled:root.canSend;onClicked:root.send()
+          }
         }
       }
       Keys.onEscapePressed:root.dismiss()
