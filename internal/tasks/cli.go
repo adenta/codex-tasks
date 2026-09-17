@@ -295,7 +295,7 @@ func Run(paths endpoints.Config, args []string, stdin io.Reader, stdout, stderr 
 		if len(args) != 1 {
 			return 2
 		}
-		_ = json.NewEncoder(stdout).Encode(map[string]any{"targets": paths.Targets})
+		_ = json.NewEncoder(stdout).Encode(map[string]any{"targets": paths.Targets, "desktop_projects": desktopProjects(paths)})
 		return 0
 	}
 	if args[0] == "_capabilities" {

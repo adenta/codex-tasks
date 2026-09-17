@@ -43,7 +43,7 @@ import qs.Ui
           SearchableDropdown { width:parent.width*0.68-parent.spacing;label:root.refreshing ? "Project · refreshing…" : "Project";value:root.projectId;options:root.projectOptions;onChanged:function(value){root.projectId=value;root.remember();root.status=""} }
         }
         Dropdown {
-          width:parent.width;visible:root.selectedProject!==null && root.selectedProject.isGitRepository===true
+          width:parent.width;visible:root.selectedProject!==null && root.selectedProject.isGitRepository!==false
           label:"Run in";value:root.mode;options:[{value:"worktree",label:"New worktree"},{value:"checkout",label:"Existing checkout"}]
           enabled:!root.busy && !root.uncertain
           onChanged:function(value){root.mode=value;root.remember()}

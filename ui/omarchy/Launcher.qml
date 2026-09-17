@@ -19,6 +19,7 @@ Item {
   property string taskId: ""
   property string message: ""
   property var servers: []
+  property var desktopProjects: []
   property var cache: ({})
   property var projectMemory: ({})
   property string host: settings.host
@@ -26,7 +27,17 @@ Item {
   property string mode: settings.mode
   property var targetScreen: null
   readonly property string cli: Quickshell.env("HOME") + "/.local/bin/codex-tasks"
-  readonly property var projects: cache[host] || []
+  readonly property var projects: {
+    var list=(cache[host] || []).slice()
+    desktopProjects.filter(function(p){return p.host===root.host}).forEach(function(p){
+      var index=list.findIndex(function(x){return x.roots && x.roots.some(function(r){return r.path===p.path})})
+      var entry=index>=0 ? Object.assign({},list[index]) : {roots:[{path:p.path}]}
+      entry.serverProjectId=index>=0 ? entry.id : ""
+      entry.id="folder:"+p.path;entry.name=p.name || entry.name || p.path;entry.desktopFolder=true
+      if(index>=0)list[index]=entry;else list.push(entry)
+    })
+    return list
+  }
   readonly property var selectedProject: projects.find(function(p) { return p.id === root.projectId }) || null
   readonly property bool validServer: servers.some(function(s) { return s.value === root.host })
   readonly property bool canSend: !busy && !uncertain && validServer && message.trim().length > 0 && (projectId === "" || (selectedProject !== null && !selectedProject.unavailable))
@@ -85,7 +96,9 @@ Item {
     if(projectId) {
       var p=selectedProject
       if(!p.roots || !p.roots.length) { status="Project has no working directory.";return }
-      args.push("--project",p.id,"--cwd",p.roots[0].path)
+      args.push("--cwd",p.roots[0].path)
+      if(p.serverProjectId)args.push("--project",p.serverProjectId)
+      else if(!p.desktopFolder)args.push("--project",p.id)
       if(mode==="checkout")args.push("--checkout")
     } else args.push("--projectless")
     remember();busy=true;status="Creating task on " + host + "…";taskId=""
@@ -106,6 +119,7 @@ Item {
       try {
         if(code!==0)throw new Error(targetsError.text || "Could not load servers")
         var data=JSON.parse(targetsOutput.text)
+        root.desktopProjects=data.desktop_projects || []
         root.servers=(data.targets || []).filter(function(t){return !t.native_only}).map(function(t){return {value:t.host,label:t.host}})
         if(!root.validServer) root.status="Select an available server."
       }catch(e){root.status=String(e)}

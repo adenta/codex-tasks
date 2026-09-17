@@ -34,3 +34,9 @@ another send; Open task never resends the prompt.
 
 Remove the binding and plugin entry, then the plugin directory, to uninstall the
 popup. The CLI and skill remain independent. Remove launcher.ini to reset choices.
+
+The picker also reads the desktop's saved remote folder inventory through
+`targets`, matching only configured SSH aliases. Desktop-only folders are sent
+as paths, never desktop project IDs. The server resolves or creates its own
+project assignment. Git mode choices on an unclassified folder apply if it is
+Git; non-Git folders run directly. Desktop state is never modified.
