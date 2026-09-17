@@ -121,3 +121,14 @@ CI supplies Codex 0.154.0 explicitly and checks its version.
 See [migration and validation notes](docs/migration.md). Extracted from
 [adenta/codex-ops](https://github.com/adenta/codex-ops), snapshot
 `ef47c97e74086501019f76671e140c9a5abaf3fa`.
+
+## Optional Omarchy popup
+
+See [ui/omarchy](ui/omarchy/README.md) for a themed remote task composer and an
+Alt+Space binding. The CLI remains independent of Quickshell and Omarchy.
+`targets` prints configured remote destinations as JSON without network access.
+`create --projectless` can omit `--cwd` to allocate a unique workspace under the
+executing account's Documents/Codex, with work/outputs and developer instructions.
+`create --wait-history --message-file -` waits up to ten seconds for readable
+accepted input before returning `history_ready: true`; this does not wait for
+inference completion. Update remote helpers before using these options.

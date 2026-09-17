@@ -11,6 +11,7 @@ import (
 )
 
 type Project struct {
+	IsGit       bool   `json:"isGitRepository"`
 	Unavailable bool   `json:"unavailable,omitempty"`
 	Reason      string `json:"reason,omitempty"`
 	ID          string `json:"id"`
@@ -27,6 +28,8 @@ func projectAvailability(project *Project) {
 			continue
 		}
 		if info, err := os.Stat(root.Path); err == nil && info.IsDir() {
+			_, gitErr := git(context.Background(), root.Path, "rev-parse", "--show-toplevel")
+			project.IsGit = gitErr == nil
 			project.Unavailable = false
 			project.Reason = ""
 			return
@@ -165,6 +168,16 @@ func (s *service) workspace(ctx context.Context, o Options) (string, bool, error
 }
 
 func (s *service) create(ctx context.Context, o Options, r *Result) error {
+	generated := ""
+	if o.Projectless && o.CWD == "" {
+		var err error
+		generated, err = newProjectlessWorkspace()
+		if err != nil {
+			return err
+		}
+		o.CWD = generated
+		r.Workspace = generated
+	}
 	// Establish project identity first, and preserve any created project ID in
 	// the result even if a later operation fails.
 	project, err := s.project(ctx, o)
@@ -180,6 +193,9 @@ func (s *service) create(ctx context.Context, o Options, r *Result) error {
 		r.Worktree = workspace
 	}
 	params := map[string]any{"cwd": workspace, "ephemeral": false, "historyMode": "paginated", "threadSource": "agent_created_thread"}
+	if generated != "" {
+		params["developerInstructions"] = projectlessInstructions(generated)
+	}
 	if project != "" {
 		params["projectId"] = project
 	}
@@ -237,6 +253,9 @@ func (s *service) create(ctx context.Context, o Options, r *Result) error {
 	if o.Message != "" {
 		if err := s.message(ctx, o, r); err != nil {
 			return err
+		}
+		if o.WaitHistory {
+			return s.waitHistory(ctx, r)
 		}
 	}
 	return nil

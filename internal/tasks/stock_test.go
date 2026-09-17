@@ -267,7 +267,9 @@ stream_max_retries = 0
 		t.Fatalf("closing sender stopped the task: %s", output.String())
 	}
 	blank := opts("create", "")
-	blank.CWD = workspace
+	t.Setenv("HOME", root)
+	blank.CWD = ""
+	blank.WaitHistory = true
 	blank.Projectless = true
 	blank.Title = "First-message projectless fixture"
 	blank.Model = "openai/gpt-5.6-sol"

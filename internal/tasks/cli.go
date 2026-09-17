@@ -43,6 +43,7 @@ Native desktop task tools remain necessary for desktop-only targets and handoff.
 `
 
 type Options struct {
+	WaitHistory     bool          `json:"wait_history,omitempty"`
 	Target          string        `json:"target,omitempty"`
 	Query           string        `json:"query,omitempty"`
 	Archive         string        `json:"archive,omitempty"`
@@ -109,6 +110,7 @@ func parse(args []string, stdin io.Reader) (Options, error) {
 	fs.StringVar(&o.Mode, "mode", "", "plan or default")
 	fs.StringVar(&o.Ref, "ref", "", "Git starting ref")
 	fs.BoolVar(&o.Checkout, "checkout", false, "use existing checkout")
+	fs.BoolVar(&o.WaitHistory, "wait-history", false, "wait up to 10s for accepted input in history")
 	fs.BoolVar(&o.Projectless, "projectless", false, "omit project assignment")
 	fs.BoolVar(&o.Archived, "archived", false, "list archived tasks")
 	fs.IntVar(&o.Limit, "limit", 20, "page size")
@@ -139,7 +141,7 @@ func parse(args []string, stdin io.Reader) (Options, error) {
 	}
 	allowed := map[string]string{
 		"find": "query archive limit cursor", "projects": "limit cursor", "list": "project archived limit cursor", "read": "turn limit cursor item offset max-chars include-outputs",
-		"create": "cwd project projectless checkout ref title model mode message-file wait", "fork": "title mode",
+		"create": "cwd project projectless checkout ref title model mode message-file wait wait-history", "fork": "title mode",
 		"message": "message-file wait", "progress": "turn wait", "mode": "mode", "archive": "", "unarchive": "",
 		"activity": "since task action outcome limit follow",
 	}
@@ -264,7 +266,10 @@ func validate(o Options) error {
 	default:
 		return fmt.Errorf("unsupported task operation")
 	}
-	if o.Action == "create" && !filepath.IsAbs(o.CWD) {
+	if o.WaitHistory && (o.Action != "create" || strings.TrimSpace(o.Message) == "") {
+		return fmt.Errorf("--wait-history requires create with a nonempty message")
+	}
+	if o.Action == "create" && !(o.Projectless && o.CWD == "") && !filepath.IsAbs(o.CWD) {
 		return fmt.Errorf("create requires --cwd with an absolute directory")
 	}
 	if o.Action == "message" && strings.TrimSpace(o.Message) == "" {
@@ -286,11 +291,18 @@ func Run(paths endpoints.Config, args []string, stdin io.Reader, stdout, stderr 
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
+	if args[0] == "targets" {
+		if len(args) != 1 {
+			return 2
+		}
+		_ = json.NewEncoder(stdout).Encode(map[string]any{"targets": paths.Targets})
+		return 0
+	}
 	if args[0] == "_capabilities" {
 		if len(args) != 1 {
 			return 2
 		}
-		_ = json.NewEncoder(stdout).Encode(map[string]any{"tasks_protocol": 2, "build_id": buildinfo.BuildID, "host": string(paths.Host), "account": paths.Account})
+		_ = json.NewEncoder(stdout).Encode(map[string]any{"tasks_protocol": 2, "remote_launcher": true, "build_id": buildinfo.BuildID, "host": string(paths.Host), "account": paths.Account})
 		return 0
 	}
 	if args[0] == "_remote" {
@@ -435,7 +447,7 @@ func dispatch(ctx context.Context, alias string, o Options, r *Result) error {
 	if r.Account == "" {
 		return fmt.Errorf("expected destination account is required")
 	}
-	if err := checkRemoteTasks(ctx, alias, strings.ToLower(o.Host), r.Account, r); err != nil {
+	if err := checkRemoteTasks(ctx, alias, strings.ToLower(o.Host), r.Account, r, o.WaitHistory || (o.Projectless && o.CWD == "")); err != nil {
 		r.Outcome = "failed"
 		return err
 	}

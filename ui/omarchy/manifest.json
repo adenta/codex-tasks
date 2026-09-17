@@ -1,0 +1,1 @@
+{"schemaVersion":1,"id":"adenta.codex-tasks","name":"Codex Tasks","version":"1.0.0","author":"Andre","description":"Send a task to a remote Codex server","kinds":["overlay"],"keepLoaded":true,"entryPoints":{"overlay":"Launcher.qml"}}

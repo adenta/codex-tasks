@@ -8,6 +8,8 @@ import (
 )
 
 var commandHelp = map[string]string{
+	"targets": `targets
+Print configured remote targets as JSON without making a network request.`,
 	"find": `find --query TEXT [--archive all|active|archived] [--limit N] [--cursor CURSOR]
 Search IDs, codex://threads/UUID links, titles and previews on configured sources.
 Includes archives by default; limit 20 per source (1–100), scan bound 1000 entries.
@@ -31,7 +33,7 @@ and share those bounds. Offset is a Unicode character offset, default 0.
 Follow next_cursor even on empty pages. For truncated items use that item's
 continuation_cursor, --item and next_offset; retain task/turn/output filters.
 Example: codex-tasks read TASK_UUID --limit 20 --host server`,
-	"create": `create --cwd DIRECTORY [--project ID | --projectless]
+	"create": `create [--cwd DIRECTORY] [--project ID | --projectless]
        [--checkout | --ref REF] [--title TITLE] [--model MODEL]
        [--mode plan|default] [--message-file FILE|-] [--wait DURATION]
 Create a task only within the user's requested scope. CWD must be absolute on
@@ -42,6 +44,8 @@ Confirmed non-Git directories are used directly. --projectless omits assignment.
 Omitted model/mode preserve server defaults. Optional first message starts work.
 Title max 512 bytes. On partial/unknown preserve project/worktree/task IDs and
 inspect before another create. Never blindly replay after connection loss.
+With --projectless, omitting --cwd allocates Documents/Codex/date/task-* with work/outputs and developer instructions.
+--wait-history requires a message and waits up to 10s for readable accepted input.
 Example: codex-tasks create --cwd /path/to/repo --mode plan --message-file brief.txt`,
 	"fork": `fork TASK [--title TITLE] [--mode plan|default]
 Fork persisted history before any unfinished running turn. Inherits checkout;
@@ -147,7 +151,7 @@ func Help(args []string, w io.Writer) (int, bool) {
 			}
 			if strings.HasPrefix(a, "-") && !strings.Contains(a, "=") {
 				switch a {
-				case "--json", "--checkout", "--projectless", "--archived", "--include-outputs", "--follow":
+				case "--wait-history", "--json", "--checkout", "--projectless", "--archived", "--include-outputs", "--follow":
 				default:
 					i++
 				}

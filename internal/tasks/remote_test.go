@@ -28,7 +28,7 @@ func TestRemoteHelperProcess(t *testing.T) {
 
 func TestRemoteUsesStdinRecordsOnceAndPreservesSemanticFailure(t *testing.T) {
 	dir := t.TempDir()
-	script := "#!/bin/sh\nfor arg do last_arg=$arg; done\nif [ \"$last_arg\" = _capabilities ]; then printf '%s\\n' '{\"tasks_protocol\":2,\"host\":\"love\",\"account\":\"agent\"}'; exit 0; fi\nexec '" + strings.ReplaceAll(os.Args[0], "'", "'\\''") + "' -test.run=^TestRemoteHelperProcess$\n"
+	script := "#!/bin/sh\nfor arg do last_arg=$arg; done\nif [ \"$last_arg\" = _capabilities ]; then printf '%s\\n' '{\"tasks_protocol\":2,\"remote_launcher\":true,\"host\":\"love\",\"account\":\"agent\"}'; exit 0; fi\nexec '" + strings.ReplaceAll(os.Args[0], "'", "'\\''") + "' -test.run=^TestRemoteHelperProcess$\n"
 	if err := os.WriteFile(filepath.Join(dir, "ssh"), []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -115,6 +115,7 @@ func TestRemoteCompatibleHostReceivesExactMessageOnce(t *testing.T) {
 	t.Setenv("TASKS_REMOTE_HELPER", "1")
 	o := opts("create", "")
 	o.Host = "love"
+	o.CWD = "/existing"
 	o.Projectless = true
 	o.Message = "SECRET_PROMPT\n`literal` $(literal)"
 	r := Result{Account: "agent"}

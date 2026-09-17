@@ -125,3 +125,10 @@ mean a task operation failed and is not a reason to retry it.
 There is no `tasks operation` command, receipt store, or automatic reconciliation.
 The existing activity log is observational; an operation ID is not a retry key.
 Native operations remain outside codex-tasks activity coverage.
+
+For an explicitly requested projectless task, `create --projectless` may omit
+`--cwd` to allocate Documents/Codex on the destination account, with work/outputs
+and matching developer instructions. `--wait-history` requires a first message
+and waits up to ten seconds for readable accepted input; it does not mean the
+turn completed. `targets` prints remote configuration without network requests.
+The optional Omarchy popup is documented in ui/omarchy/README.md.

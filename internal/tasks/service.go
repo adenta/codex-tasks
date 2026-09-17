@@ -41,6 +41,7 @@ type Item struct {
 	ContinuationCursor string `json:"continuation_cursor,omitempty"`
 }
 type Result struct {
+	Workspace      string     `json:"workspace,omitempty"`
 	Coverage       []Coverage `json:"coverage,omitempty"`
 	SearchComplete *bool      `json:"search_complete,omitempty"`
 	OmittedItems   int        `json:"omitted_items,omitempty"`

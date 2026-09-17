@@ -4,7 +4,8 @@ This is the standalone task CLI and optional skill. Preserve direct shell usage
 and complete offline help. Native helpers are preferred by the skill; this CLI
 fills gaps when they are unavailable, broken, or insufficient.
 
-Do not add server lifecycle management, desktop launchers, fleet management,
+The optional ui/omarchy remote launcher is in scope; keep the CLI independent.
+Do not add server lifecycle management, fleet management,
 authentication setup or provider/billing infrastructure. Keep remote SSH aliases
 explicit, verify host/account identity before mutation, and never replay an
 uncertain mutation automatically. Task state/history is read-only outside the
