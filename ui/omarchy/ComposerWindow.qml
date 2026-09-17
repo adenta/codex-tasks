@@ -34,8 +34,8 @@ import qs.Ui
         spacing:Style.space(16)
         Row {
           width:parent.width
-          Text { width:parent.width-Style.space(40);text:"New remote task";color:Color.popups.text;font.family:Style.font.family;font.pixelSize:Style.space(20);font.bold:true;anchors.verticalCenter:parent.verticalCenter }
-          Button { text:"×";fontSize:Style.space(26);width:Style.space(40);height:width;bordered:true;focusable:true;tooltipText:"Close (Esc)";enabled:!root.busy;onClicked:root.dismiss() }
+          Text { width:parent.width-Style.space(34);text:"New remote task";color:Color.popups.text;font.family:Style.font.family;font.pixelSize:Style.space(20);font.bold:true;anchors.verticalCenter:parent.verticalCenter }
+          Button { text:"×";fontSize:Style.space(20);width:Style.space(34);height:width;bordered:true;focusable:true;tooltipText:"Close (Esc)";enabled:!root.busy;onClicked:root.dismiss() }
         }
         Row {
           width:parent.width;spacing:Style.space(12);enabled:!root.busy && !root.uncertain
