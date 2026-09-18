@@ -2,11 +2,7 @@ package tasks
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/adenta/codex-tasks/internal/endpoints"
@@ -74,88 +70,43 @@ func executeAt(ctx context.Context, p endpoints.Config, o Options, r *Result) er
 		return err
 	}
 	o.Target, o.Host = "", host
-	if len(o.Images) > 0 {
-		dir, images, err := stageImages(p, o.Images)
-		if err != nil {
-			r.ErrorCategory = "invalid_image"
-			return err
-		}
-		o.Images = images
-		defer func() {
-			// The remote host retains its own copy after submission.
-			if alias != "" || (r.Outcome != "unknown" && !r.InputAccepted) {
-				_ = os.RemoveAll(dir)
-			}
-		}()
-	}
+	var c *Client
 	if alias == "" {
-		return executeLocal(ctx, p, o, r)
-	}
-	return dispatch(ctx, alias, o, r)
-}
-
-// Increment when the remote request contract changes; peers must match exactly.
-const tasksProtocol = 6
-
-// Read-only handshake precedes dispatch; the executing helper checks the same
-// identity and protocol again before touching any task.
-func checkRemoteTasks(ctx context.Context, alias, host, account string, r *Result) error {
-	cmd := exec.CommandContext(ctx, "ssh", "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-o", "StrictHostKeyChecking=yes", "--", alias, endpoints.Command, "_capabilities")
-	var output limitedBuffer
-	var diagnostic diagnosticBuffer
-	cmd.Stdout, cmd.Stderr = &output, &diagnostic
-	err := cmd.Run()
-	var cap struct {
-		Protocol int    `json:"tasks_protocol"`
-		Host     string `json:"host"`
-		Account  string `json:"account"`
+		c, err = Dial(ctx, p.SocketPath())
+	} else {
+		socket := ""
+		for _, t := range p.Targets {
+			if t.Host == host && t.Account == account {
+				socket = t.Socket
+			}
+		}
+		c, err = DialRemote(ctx, alias, socket)
 	}
 	if err != nil {
 		r.ErrorCategory = "transport_unavailable"
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) && exitErr.ExitCode() != 255 {
-			r.ErrorCategory = "remote_incompatible"
+		return err
+	}
+	defer c.Close()
+	if c.CodexHome == "" || c.PlatformOS != "linux" {
+		return fmt.Errorf("stock server must report its Codex home and Linux platform")
+	}
+	s := service{rpc: c, client: c, home: c.CodexHome, localHome: p.CodexHome}
+	if alias != "" {
+		out, e := s.command(ctx, "", false, "sh", "-c", "hostname && id -un")
+		if e != nil {
+			return fmt.Errorf("cannot verify server identity: %w", e)
 		}
-		return fmt.Errorf("cannot check %s/%s: %s. No task action was sent", host, account, diagnostic.message(err))
-	}
-	if json.Unmarshal(output.data, &cap) != nil {
-		r.ErrorCategory = "remote_incompatible"
-		return fmt.Errorf("invalid codex-tasks handshake from %s/%s; no task action was sent", host, account)
-	}
-	if cap.Protocol != tasksProtocol {
-		r.ErrorCategory = "remote_incompatible"
-		return fmt.Errorf("codex-tasks protocol mismatch on %s/%s: got %d, require %d; no task action was sent", host, account, cap.Protocol, tasksProtocol)
-	}
-	if cap.Host != host || cap.Account != account {
-		r.ErrorCategory = "destination_mismatch"
-		return fmt.Errorf("connection identifies %s/%s; expected %s/%s. No task action was sent", clean(cap.Host, 80), clean(cap.Account, 80), host, account)
-	}
-	return nil
-}
-
-type diagnosticBuffer struct{ data []byte }
-
-func (b *diagnosticBuffer) Write(p []byte) (int, error) {
-	n := len(p)
-	if remaining := 2048 - len(b.data); remaining > 0 {
-		if len(p) > remaining {
-			p = p[:remaining]
-		}
-		b.data = append(b.data, p...)
-	}
-	return n, nil
-}
-func (b *diagnosticBuffer) message(err error) string {
-	// Recognized transport errors only: remote stderr can contain arbitrary
-	// shell output, credentials, or echoed input and must not be reproduced.
-	lower := strings.ToLower(string(b.data))
-	for _, reason := range []string{"permission denied", "host key verification failed", "connection refused", "connection timed out", "could not resolve hostname", "no route to host", "command not found", "not found", "connection closed"} {
-		if strings.Contains(lower, reason) {
-			return reason
+		fields := strings.Fields(out)
+		if len(fields) != 2 || strings.ToLower(fields[0]) != host || fields[1] != account {
+			r.ErrorCategory = "destination_mismatch"
+			return fmt.Errorf("server identity does not match %s/%s; no task action was sent", host, account)
 		}
 	}
-	if err != nil {
-		return clean(err.Error(), 200)
+	err = s.executeWithImages(ctx, p, o, r)
+	if s.uncertain {
+		r.Outcome, r.ErrorCategory = "unknown", "transport_uncertain"
+	} else if err != nil && r.InputAccepted {
+		r.Outcome, r.ErrorCategory = "unknown", "observation_unavailable"
 	}
-	return "invalid remote response"
+	return err
 }

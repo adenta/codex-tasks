@@ -4,9 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -44,35 +42,22 @@ func validEnvironmentID(id string) bool {
 
 // Read the selected checkout's configuration, but run it in the new worktree.
 // A real TOML parser is needed for multiline setup scripts and OS overrides.
-func readEnvironment(cwd, id string) (*environmentConfig, error) {
+func (s *service) readEnvironment(ctx context.Context, cwd, id string) (*environmentConfig, error) {
 	if !validEnvironmentID(id) {
 		return nil, fmt.Errorf("environment must be a filename from .codex/environments")
 	}
 	dir := filepath.Join(cwd, ".codex", "environments")
-	realDir, err := filepath.EvalSymlinks(dir)
+	realDir, err := s.realpath(ctx, dir)
 	if err != nil {
 		return nil, fmt.Errorf("environment directory is unavailable")
 	}
-	path, err := filepath.EvalSymlinks(filepath.Join(dir, id))
+	path, err := s.realpath(ctx, filepath.Join(dir, id))
 	if err != nil || filepath.Dir(path) != realDir {
 		return nil, fmt.Errorf("environment file is missing or outside its environment directory")
 	}
-	info, err := os.Stat(path)
-	if err != nil || !info.Mode().IsRegular() || info.Size() > 1<<20 {
-		return nil, fmt.Errorf("environment must be a regular TOML file of at most 1 MiB")
-	}
-	f, err := os.Open(path)
+	data, err := s.readFile(ctx, path, 1<<20)
 	if err != nil {
-		return nil, fmt.Errorf("cannot read environment file")
-	}
-	defer f.Close()
-	info, err = f.Stat()
-	if err != nil || !info.Mode().IsRegular() || info.Size() > 1<<20 {
-		return nil, fmt.Errorf("environment must be a regular TOML file of at most 1 MiB")
-	}
-	data, err := io.ReadAll(io.LimitReader(f, (1<<20)+1))
-	if err != nil || len(data) > 1<<20 {
-		return nil, fmt.Errorf("cannot read environment file within size limit")
+		return nil, fmt.Errorf("cannot read environment file: %w", err)
 	}
 	var config environmentConfig
 	if err := toml.Unmarshal(data, &config); err != nil {
@@ -84,25 +69,26 @@ func readEnvironment(cwd, id string) (*environmentConfig, error) {
 	return &config, nil
 }
 
-func environmentRepository(ctx context.Context, cwd string) (bool, error) {
-	info, err := os.Stat(cwd)
+func (s *service) environmentRepository(ctx context.Context, cwd string) (bool, error) {
+	info, err := s.stat(ctx, cwd, true)
 	if err != nil || !info.IsDir() {
 		return false, fmt.Errorf("project directory is unavailable")
 	}
-	cmd := exec.CommandContext(ctx, "git", "-C", cwd, "rev-parse", "--show-toplevel")
-	cmd.Env = append(os.Environ(), "LC_ALL=C")
-	output, err := cmd.CombinedOutput()
-	if err == nil {
+	r, err := s.commandResult(ctx, "", false, "git", "-C", cwd, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return false, err
+	}
+	if *r.ExitCode == 0 {
 		return true, nil
 	}
-	if strings.Contains(string(output), "not a git repository") {
+	if strings.Contains(r.Stderr, "not a git repository") {
 		return false, nil
 	}
 	return false, fmt.Errorf("cannot determine whether project is a Git repository")
 }
 
-func listEnvironments(ctx context.Context, cwd string, r *Result) error {
-	isGit, err := environmentRepository(ctx, cwd)
+func (s *service) listEnvironments(ctx context.Context, cwd string, r *Result) error {
+	isGit, err := s.environmentRepository(ctx, cwd)
 	if err != nil {
 		return err
 	}
@@ -111,7 +97,14 @@ func listEnvironments(ctx context.Context, cwd string, r *Result) error {
 	if !isGit {
 		return nil
 	}
-	entries, err := os.ReadDir(filepath.Join(cwd, ".codex", "environments"))
+	_, err = s.stat(ctx, filepath.Join(cwd, ".codex", "environments"), true)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	entries, err := s.readDir(ctx, filepath.Join(cwd, ".codex", "environments"))
 	if os.IsNotExist(err) {
 		return nil
 	}
@@ -119,11 +112,11 @@ func listEnvironments(ctx context.Context, cwd string, r *Result) error {
 		return fmt.Errorf("cannot list project environments")
 	}
 	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".toml") {
+		if entry.IsDirectory || !strings.HasSuffix(entry.FileName, ".toml") {
 			continue
 		}
-		e := Environment{ID: entry.Name(), Name: entry.Name()}
-		config, err := readEnvironment(cwd, e.ID)
+		e := Environment{ID: entry.FileName, Name: entry.FileName}
+		config, err := s.readEnvironment(ctx, cwd, e.ID)
 		if err != nil {
 			e.Error = err.Error()
 		} else if strings.TrimSpace(config.Name) != "" {
@@ -172,7 +165,7 @@ func (b *setupOutput) Write(p []byte) (int, error) {
 	return n, nil
 }
 
-// Logs are private to the destination account and expire after seven days.
+// Logs are private to the invoking account and expire after seven days.
 // Keep the first 2 MiB in the file and the final 8 KiB in the result.
 func (s *service) runEnvironmentSetup(ctx context.Context, workspace string, e *environmentConfig, r *Result) error {
 	r.SetupStatus = "failed"
@@ -180,7 +173,11 @@ func (s *service) runEnvironmentSetup(ctx context.Context, workspace string, e *
 		r.SetupStatus = "completed"
 		return nil
 	}
-	dir := filepath.Join(s.home, "codex-tasks", "setup-logs")
+	logHome := s.localHome
+	if logHome == "" {
+		logHome = s.home
+	}
+	dir := filepath.Join(logHome, "codex-tasks", "setup-logs")
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("cannot create private setup log directory: %w", err)
 	}

@@ -19,7 +19,14 @@ type fakeRPC struct {
 	handle  func(string, map[string]any) (any, error)
 }
 
-func (f *fakeRPC) Call(_ context.Context, m string, p, out any) error {
+func (f *fakeRPC) Call(ctx context.Context, m string, p, out any) error {
+	if v, err, ok := fixtureDestination(ctx, m, p.(map[string]any)); ok {
+		if err != nil {
+			return err
+		}
+		b, _ := json.Marshal(v)
+		return json.Unmarshal(b, out)
+	}
 	f.methods = append(f.methods, m)
 	v, err := f.handle(m, p.(map[string]any))
 	if err != nil {
@@ -258,15 +265,15 @@ func TestCLIValidationAndHostInventory(t *testing.T) {
 		}
 	}
 	xps, _ := fixtureRole("xps")
-	alias, account, err := connection(xps, "grace")
+	_, account, alias, err := resolveRoute(xps, Options{Host: "grace"})
 	if err != nil || alias != "grace" || account != "agent" {
 		t.Fatalf("%s %s %v", alias, account, err)
 	}
 	grace, _ := fixtureAccount("grace", "agent", "/home/agent")
-	if _, _, err = connection(grace, "missing"); err == nil {
+	if _, _, _, err = resolveRoute(grace, Options{Host: "missing"}); err == nil {
 		t.Fatal("unconfigured route accepted")
 	}
-	if _, _, err := connection(grace, "love"); err == nil {
+	if _, _, _, err := resolveRoute(grace, Options{Host: "love"}); err == nil {
 		t.Fatal("used the desktop account's connection for the agent account")
 	}
 }
@@ -283,7 +290,7 @@ func TestWorktreeIsolationAndMissingDefaultRef(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(repo, "uncommitted"), []byte("keep"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	s := service{home: home}
+	s := service{home: home, rpc: &fakeRPC{}}
 	o := opts("create", "")
 	o.CWD = repo
 	if _, _, err := s.workspace(ctx, o); err == nil {

@@ -325,7 +325,8 @@ Item {
         root.status=data.error || "Creation could not be confirmed. Inspect tasks before sending again."
         if(root.taskId)root.status+=" Task: "+root.taskId
         if(data.worktree)root.status+=" Worktree: "+data.worktree
-        if(data.setup_log_path)root.status+="\nSetup log on "+root.host+": "+data.setup_log_path
+        if(data.attachment_directory)root.status+="\nAttachments on "+root.host+": "+data.attachment_directory
+        if(data.setup_log_path)root.status+="\nSetup log on this computer: "+data.setup_log_path
         if(data.setup_output)root.status+="\n"+data.setup_output
       }catch(e){root.uncertain=true;root.status="Could not confirm delivery. Check tasks on " + root.host + " before sending again. " + String(createError.text || e)}
       if(background) { root.recoveryPending=true;root.notifyDelivery(false, root.taskId) }

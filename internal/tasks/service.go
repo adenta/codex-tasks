@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 )
 
 type Task struct {
+	Path                 string  `json:"path,omitempty"`
 	Host                 string  `json:"host,omitempty"`
 	Account              string  `json:"account,omitempty"`
 	Preview              string  `json:"preview,omitempty"`
@@ -43,39 +45,40 @@ type Item struct {
 	ContinuationCursor string `json:"continuation_cursor,omitempty"`
 }
 type Result struct {
-	Environments   []Environment `json:"environments,omitempty"`
-	EnvironmentGit *bool         `json:"environment_git,omitempty"`
-	SetupStatus    string        `json:"setup_status,omitempty"`
-	SetupOutput    string        `json:"setup_output,omitempty"`
-	SetupExitCode  *int          `json:"setup_exit_code,omitempty"`
-	SetupLogPath   string        `json:"setup_log_path,omitempty"`
-	Workspace      string        `json:"workspace,omitempty"`
-	Coverage       []Coverage    `json:"coverage,omitempty"`
-	SearchComplete *bool         `json:"search_complete,omitempty"`
-	OmittedItems   int           `json:"omitted_items,omitempty"`
-	ItemFound      *bool         `json:"item_found,omitempty"`
-	Created        bool          `json:"created,omitempty"`
-	OperationID    string        `json:"operation_id"`
-	Host           string        `json:"host"`
-	Account        string        `json:"account"`
-	Action         string        `json:"action"`
-	Outcome        string        `json:"outcome"`
-	HistoryReady   bool          `json:"history_ready,omitempty"`
-	InputAccepted  bool          `json:"input_accepted,omitempty"`
-	ErrorCategory  string        `json:"error_category,omitempty"`
-	Error          string        `json:"error,omitempty"`
-	ActivityStatus string        `json:"activity_status,omitempty"`
-	Task           *Task         `json:"task,omitempty"`
-	Tasks          []Task        `json:"tasks,omitempty"`
-	Projects       []Project     `json:"projects,omitempty"`
-	Items          []Item        `json:"items,omitempty"`
-	NextCursor     string        `json:"next_cursor,omitempty"`
-	TurnID         string        `json:"turn_id,omitempty"`
-	TurnStatus     string        `json:"turn_status,omitempty"`
-	Attention      string        `json:"attention,omitempty"`
-	Worktree       string        `json:"worktree,omitempty"`
-	ProjectID      string        `json:"project_id,omitempty"`
-	Mode           string        `json:"mode,omitempty"`
+	AttachmentDirectory string        `json:"attachment_directory,omitempty"`
+	Environments        []Environment `json:"environments,omitempty"`
+	EnvironmentGit      *bool         `json:"environment_git,omitempty"`
+	SetupStatus         string        `json:"setup_status,omitempty"`
+	SetupOutput         string        `json:"setup_output,omitempty"`
+	SetupExitCode       *int          `json:"setup_exit_code,omitempty"`
+	SetupLogPath        string        `json:"setup_log_path,omitempty"`
+	Workspace           string        `json:"workspace,omitempty"`
+	Coverage            []Coverage    `json:"coverage,omitempty"`
+	SearchComplete      *bool         `json:"search_complete,omitempty"`
+	OmittedItems        int           `json:"omitted_items,omitempty"`
+	ItemFound           *bool         `json:"item_found,omitempty"`
+	Created             bool          `json:"created,omitempty"`
+	OperationID         string        `json:"operation_id"`
+	Host                string        `json:"host"`
+	Account             string        `json:"account"`
+	Action              string        `json:"action"`
+	Outcome             string        `json:"outcome"`
+	HistoryReady        bool          `json:"history_ready,omitempty"`
+	InputAccepted       bool          `json:"input_accepted,omitempty"`
+	ErrorCategory       string        `json:"error_category,omitempty"`
+	Error               string        `json:"error,omitempty"`
+	ActivityStatus      string        `json:"activity_status,omitempty"`
+	Task                *Task         `json:"task,omitempty"`
+	Tasks               []Task        `json:"tasks,omitempty"`
+	Projects            []Project     `json:"projects,omitempty"`
+	Items               []Item        `json:"items,omitempty"`
+	NextCursor          string        `json:"next_cursor,omitempty"`
+	TurnID              string        `json:"turn_id,omitempty"`
+	TurnStatus          string        `json:"turn_status,omitempty"`
+	Attention           string        `json:"attention,omitempty"`
+	Worktree            string        `json:"worktree,omitempty"`
+	ProjectID           string        `json:"project_id,omitempty"`
+	Mode                string        `json:"mode,omitempty"`
 }
 
 type rpc interface {
@@ -86,6 +89,7 @@ type service struct {
 	rpc       rpc
 	client    *Client
 	home      string
+	localHome string
 	uncertain bool
 }
 
@@ -104,6 +108,10 @@ func (s *service) thread(ctx context.Context, id string) (Task, error) {
 	err := s.call(ctx, "thread/read", map[string]any{"threadId": id, "includeTurns": false}, &reply, false)
 	if err == nil && reply.Thread.ID != id {
 		err = fmt.Errorf("app-server returned an unexpected task")
+	}
+	if err == nil && reply.Thread.Path != "" {
+		rel, e := filepath.Rel(filepath.Join(s.home, "archived_sessions"), reply.Thread.Path)
+		reply.Thread.Archived = e == nil && rel != ".." && !strings.HasPrefix(rel, "../")
 	}
 	return reply.Thread, err
 }
@@ -173,6 +181,10 @@ func (s *service) mode(ctx context.Context, t Task, mode string, r *Result) erro
 
 func (s *service) execute(ctx context.Context, o Options, r *Result) error {
 	switch o.Action {
+	case "find":
+		return s.find(ctx, o, r)
+	case "environments":
+		return s.listEnvironments(ctx, o.CWD, r)
 	case "projects":
 		var page struct {
 			Data       []Project `json:"data"`
@@ -180,7 +192,7 @@ func (s *service) execute(ctx context.Context, o Options, r *Result) error {
 		}
 		err := s.call(ctx, "project/list", map[string]any{"limit": o.Limit, "cursor": nullable(o.Cursor)}, &page, false)
 		for i := range page.Data {
-			projectAvailability(&page.Data[i])
+			s.projectAvailability(ctx, &page.Data[i])
 		}
 		r.Projects, r.NextCursor = page.Data, page.NextCursor
 		return err
@@ -198,8 +210,6 @@ func (s *service) execute(ctx context.Context, o Options, r *Result) error {
 		return err
 	case "create":
 		return s.create(ctx, o, r)
-	case "find":
-		return s.find(ctx, o, r)
 	}
 	t, err := s.thread(ctx, o.TaskID)
 	if err != nil {

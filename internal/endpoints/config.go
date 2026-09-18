@@ -12,8 +12,6 @@ import (
 	"strings"
 )
 
-const Command = "codex-tasks"
-
 var identity = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
 
 func ValidIdentity(s string) bool { return identity.MatchString(s) }
@@ -28,6 +26,7 @@ type Target struct {
 	Host    string `json:"host"`
 	Account string `json:"account"`
 	Alias   string `json:"ssh_alias,omitempty"`
+	Socket  string `json:"socket,omitempty"`
 }
 type Config struct {
 	Host      string   `json:"-"`
@@ -110,6 +109,9 @@ func Load() (Config, error) {
 		t.Host = strings.ToLower(t.Host)
 		if !ValidIdentity(t.Host) || !ValidIdentity(t.Account) || !ValidIdentity(t.Alias) {
 			return c, fmt.Errorf("target requires valid host, account and existing SSH alias")
+		}
+		if t.Socket != "" && (!filepath.IsAbs(t.Socket) || strings.ContainsAny(t.Socket, "\x00\r\n")) {
+			return c, fmt.Errorf("target socket must be an absolute path")
 		}
 		if seen[t.Host] {
 			return c, fmt.Errorf("duplicate host %q; configure one account per host", t.Host)

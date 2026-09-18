@@ -1,7 +1,6 @@
 package tasks
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -110,8 +109,8 @@ func validateImageFiles(paths []string) error {
 	return nil
 }
 
-// Snapshot caller-owned files before transport. Only these generated names are
-// passed to SFTP, and the original source files are never deleted.
+// Snapshot caller-owned files before stock file upload. Original source files
+// are never deleted.
 func stageImages(p endpoints.Config, paths []string) (dir string, staged []string, err error) {
 	if err = validateImageFiles(paths); err != nil {
 		return
@@ -163,20 +162,6 @@ func copyImage(src, dest string) error {
 	return closeErr
 }
 
-type imageRequest struct {
-	Host      string `json:"host"`
-	Account   string `json:"account"`
-	Action    string `json:"action"`
-	Directory string `json:"directory,omitempty"`
-}
-
-type imageReply struct {
-	Host      string `json:"host"`
-	Account   string `json:"account"`
-	Directory string `json:"directory,omitempty"`
-	Error     string `json:"error,omitempty"`
-}
-
 func ownedImageDir(p endpoints.Config, dir, prefix string) bool {
 	if filepath.Dir(dir) != imageRoot(p) || !strings.HasPrefix(filepath.Base(dir), prefix) {
 		return false
@@ -185,94 +170,6 @@ func ownedImageDir(p endpoints.Config, dir, prefix string) bool {
 	return err == nil
 }
 
-// Internal staging RPC; identity is checked again before any filesystem change.
-func runImages(p endpoints.Config, stdin io.Reader, stdout io.Writer) int {
-	var req imageRequest
-	dec := json.NewDecoder(io.LimitReader(stdin, 8192))
-	dec.DisallowUnknownFields()
-	if dec.Decode(&req) != nil || req.Host != p.Host || req.Account != p.Account {
-		return 2
-	}
-	reply := imageReply{Host: p.Host, Account: p.Account}
-	var err error
-	switch req.Action {
-	case "prepare":
-		reply.Directory, err = newImageDir(p, "send-")
-	case "remove":
-		if !ownedImageDir(p, req.Directory, "send-") {
-			return 2
-		}
-		err = os.RemoveAll(req.Directory)
-	default:
-		return 2
-	}
-	if err != nil {
-		reply.Error = "attachment staging failed"
-	}
-	_ = json.NewEncoder(stdout).Encode(reply)
-	return 0
-}
-
-func remoteImages(ctx context.Context, alias string, req imageRequest) (imageReply, error) {
-	b, _ := json.Marshal(req)
-	cmd := exec.CommandContext(ctx, "ssh", "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-o", "StrictHostKeyChecking=yes", "--", alias, endpoints.Command, "_images")
-	cmd.Stdin = bytes.NewReader(b)
-	var out limitedBuffer
-	var diagnostic diagnosticBuffer
-	cmd.Stdout, cmd.Stderr = &out, &diagnostic
-	err := cmd.Run()
-	var reply imageReply
-	if err != nil || json.Unmarshal(out.data, &reply) != nil || reply.Host != req.Host || reply.Account != req.Account {
-		return reply, fmt.Errorf("attachment staging failed: %s; no task was submitted", diagnostic.message(err))
-	}
-	if reply.Error != "" {
-		return reply, fmt.Errorf("remote attachment staging failed; no task was submitted")
-	}
-	return reply, nil
-}
-
-func sftpPath(path string) (string, error) {
-	if !filepath.IsAbs(path) || strings.ContainsAny(path, "\x00\r\n") {
-		return "", fmt.Errorf("unsupported attachment staging path")
-	}
-	// OpenSSH protects glob characters inside quotes; only the quote and
-	// backslash characters need escaping in its batch argument parser.
-	escaped := strings.NewReplacer("\\", "\\\\", "\"", "\\\"").Replace(path)
-	return "\"" + escaped + "\"", nil
-}
-
-func uploadImages(ctx context.Context, alias, dir string, paths []string) ([]string, error) {
-	var batch strings.Builder
-	var remote []string
-	for _, path := range paths {
-		dest := filepath.Join(dir, filepath.Base(path))
-		source, err := sftpPath(path)
-		if err != nil {
-			return nil, err
-		}
-		partial, err := sftpPath(dest + ".part")
-		if err != nil {
-			return nil, err
-		}
-		final, err := sftpPath(dest)
-		if err != nil {
-			return nil, err
-		}
-		fmt.Fprintf(&batch, "put %s %s\nrename %s %s\n", source, partial, partial, final)
-		remote = append(remote, dest)
-	}
-	cmd := exec.CommandContext(ctx, "sftp", "-q", "-b", "-", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-o", "StrictHostKeyChecking=yes", "--", alias)
-	cmd.Stdin = strings.NewReader(batch.String())
-	var diagnostic diagnosticBuffer
-	cmd.Stdout, cmd.Stderr = &diagnostic, &diagnostic
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("image upload failed: %s; no task was submitted", diagnostic.message(err))
-	}
-	return remote, nil
-}
-
-// Clipboard helpers belong to the optional Wayland launcher. Ordinary CLI image
-// input never depends on wl-paste, Quickshell, or the desktop session.
 func localImagePath(value string) string {
 	value = strings.TrimSpace(value)
 	if len(value) >= 2 && ((value[0] == '"' && value[len(value)-1] == '"') || (value[0] == '\'' && value[len(value)-1] == '\'')) {
@@ -436,4 +333,15 @@ func discardDrafts(p endpoints.Config, paths []string) error {
 		}
 	}
 	return nil
+}
+
+// Bound clipboard utility output before interpreting it.
+type limitedBuffer struct{ data []byte }
+
+func (b *limitedBuffer) Write(p []byte) (int, error) {
+	if len(b.data)+len(p) > 8<<20 {
+		return 0, fmt.Errorf("utility output exceeds limit")
+	}
+	b.data = append(b.data, p...)
+	return len(p), nil
 }

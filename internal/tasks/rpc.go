@@ -7,9 +7,13 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -49,15 +53,20 @@ type observation struct {
 }
 
 type Client struct {
-	conn          *websocket.Conn
-	transport     *http.Transport
-	mu            sync.Mutex
-	next          int
-	pending       map[int]chan rpcReply
-	observed      map[string]observation
-	commandOutput map[string]func([]byte)
-	changed       chan struct{}
-	done          chan struct{}
+	readMessage    func() ([]byte, error)
+	writeMessage   func(context.Context, []byte) error
+	closeTransport func()
+	closeOnce      sync.Once
+	writeMu        sync.Mutex
+	CodexHome      string
+	PlatformOS     string
+	mu             sync.Mutex
+	next           int
+	pending        map[int]chan rpcReply
+	observed       map[string]observation
+	commandOutput  map[string]func([]byte)
+	changed        chan struct{}
+	done           chan struct{}
 }
 
 func Dial(ctx context.Context, socket string) (*Client, error) {
@@ -82,16 +91,118 @@ func Dial(ctx context.Context, socket string) (*Client, error) {
 		t.CloseIdleConnections()
 		return nil, fmt.Errorf("app-server control socket unavailable: %w", err)
 	}
-	c := &Client{conn: conn, transport: t, pending: map[int]chan rpcReply{}, observed: map[string]observation{}, commandOutput: map[string]func([]byte){}, changed: make(chan struct{}, 1), done: make(chan struct{})}
 	conn.SetReadLimit(16 << 20)
+	c := newClient()
+	c.readMessage = func() ([]byte, error) { _, b, err := conn.Read(context.Background()); return b, err }
+	c.writeMessage = func(ctx context.Context, b []byte) error { return conn.Write(ctx, websocket.MessageText, b) }
+	c.closeTransport = func() { _ = conn.CloseNow(); t.CloseIdleConnections() }
+	return c.initialize(ctx)
+}
+
+func newClient() *Client {
+	return &Client{pending: map[int]chan rpcReply{}, observed: map[string]observation{}, commandOutput: map[string]func([]byte){}, changed: make(chan struct{}, 1), done: make(chan struct{})}
+}
+
+// OpenSSH joins remote arguments into a shell command. Quote every argument;
+// user content is carried exclusively in the stock RPC stream.
+func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'" }
+
+func DialRemote(ctx context.Context, alias, socket string) (*Client, error) {
+	command := "codex app-server proxy"
+	if socket != "" {
+		command += " --sock " + shellQuote(socket)
+	}
+	cmd := exec.CommandContext(ctx, "ssh", "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-o", "StrictHostKeyChecking=yes", "--", alias, command)
+	input, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, err
+	}
+	output, err := cmd.StdoutPipe()
+	if err != nil {
+		input.Close()
+		return nil, err
+	}
+	// Never forward remote shell diagnostics: they may contain private data.
+	cmd.Stderr = io.Discard
+	if err = cmd.Start(); err != nil {
+		input.Close()
+		output.Close()
+		return nil, fmt.Errorf("cannot connect to stock Codex proxy: %w", err)
+	}
+	// Stock proxy forwards raw control-socket bytes, including the HTTP
+	// WebSocket handshake. It is not a newline-delimited JSON transport.
+	stream := &proxyConn{reader: output, writer: input, closeFn: func() { input.Close(); output.Close(); _ = cmd.Process.Kill(); _ = cmd.Wait() }}
+	t := &http.Transport{DialContext: func(context.Context, string, string) (net.Conn, error) { return stream, nil }}
+	conn, response, err := websocket.Dial(ctx, "ws://localhost/", &websocket.DialOptions{HTTPClient: &http.Client{Transport: t}, CompressionMode: websocket.CompressionDisabled})
+	if response != nil && response.Body != nil {
+		response.Body.Close()
+	}
+	if err != nil {
+		stream.Close()
+		t.CloseIdleConnections()
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("stock Codex proxy unavailable: %w", ctx.Err())
+		}
+		return nil, fmt.Errorf("stock Codex proxy unavailable; check SSH, codex on the remote PATH, and the running server/socket")
+	}
+	conn.SetReadLimit(16 << 20)
+	c := newClient()
+	c.readMessage = func() ([]byte, error) { _, b, err := conn.Read(context.Background()); return b, err }
+	c.writeMessage = func(ctx context.Context, b []byte) error { return conn.Write(ctx, websocket.MessageText, b) }
+	c.closeTransport = func() { _ = conn.CloseNow(); stream.Close(); t.CloseIdleConnections() }
+	return c.initialize(ctx)
+}
+
+// Pipe deadlines use the underlying files when available. Context cancellation
+// of the SSH process and WebSocket also closes blocked reads and writes.
+type proxyConn struct {
+	reader  io.ReadCloser
+	writer  io.WriteCloser
+	closeFn func()
+	once    sync.Once
+}
+
+func (c *proxyConn) Read(b []byte) (int, error)  { return c.reader.Read(b) }
+func (c *proxyConn) Write(b []byte) (int, error) { return c.writer.Write(b) }
+func (c *proxyConn) Close() error                { c.once.Do(c.closeFn); return nil }
+func (c *proxyConn) LocalAddr() net.Addr         { return &net.UnixAddr{Name: "ssh-client", Net: "unix"} }
+func (c *proxyConn) RemoteAddr() net.Addr        { return &net.UnixAddr{Name: "codex-proxy", Net: "unix"} }
+func (c *proxyConn) SetReadDeadline(t time.Time) error {
+	if f, ok := c.reader.(interface{ SetReadDeadline(time.Time) error }); ok {
+		return f.SetReadDeadline(t)
+	}
+	return nil
+}
+func (c *proxyConn) SetWriteDeadline(t time.Time) error {
+	if f, ok := c.writer.(interface{ SetWriteDeadline(time.Time) error }); ok {
+		return f.SetWriteDeadline(t)
+	}
+	return nil
+}
+func (c *proxyConn) SetDeadline(t time.Time) error {
+	if err := c.SetReadDeadline(t); err != nil {
+		return err
+	}
+	return c.SetWriteDeadline(t)
+}
+
+func (c *Client) initialize(ctx context.Context) (*Client, error) {
 	go c.read()
-	var result json.RawMessage
+	var result struct {
+		CodexHome  string `json:"codexHome"`
+		PlatformOS string `json:"platformOs"`
+	}
 	if err := c.Call(ctx, "initialize", map[string]any{
 		"clientInfo":   map[string]string{"name": "codex-tasks-tasks", "version": buildinfo.BuildID},
 		"capabilities": map[string]bool{"experimentalApi": true},
 	}, &result); err != nil {
 		c.Close()
 		return nil, err
+	}
+	c.CodexHome, c.PlatformOS = result.CodexHome, result.PlatformOS
+	if result.CodexHome != "" && !filepath.IsAbs(result.CodexHome) {
+		c.Close()
+		return nil, fmt.Errorf("server returned an invalid Codex home")
 	}
 	if err := c.write(ctx, map[string]any{"method": "initialized", "params": map[string]any{}}); err != nil {
 		c.Close()
@@ -100,7 +211,7 @@ func Dial(ctx context.Context, socket string) (*Client, error) {
 	return c, nil
 }
 
-func (c *Client) Close() { _ = c.conn.CloseNow(); c.transport.CloseIdleConnections(); <-c.done }
+func (c *Client) Close() { c.closeOnce.Do(func() { c.closeTransport(); <-c.done }) }
 
 type commandResult struct {
 	ExitCode *int   `json:"exitCode"`
@@ -129,7 +240,9 @@ func (c *Client) write(ctx context.Context, v any) error {
 	if err != nil {
 		return err
 	}
-	return c.conn.Write(ctx, websocket.MessageText, b)
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	return c.writeMessage(ctx, b)
 }
 func (c *Client) Call(ctx context.Context, method string, params, result any) error {
 	c.mu.Lock()
@@ -170,7 +283,7 @@ func (c *Client) Call(ctx context.Context, method string, params, result any) er
 func (c *Client) read() {
 	defer close(c.done)
 	for {
-		_, b, err := c.conn.Read(context.Background())
+		b, err := c.readMessage()
 		if err != nil {
 			return
 		}

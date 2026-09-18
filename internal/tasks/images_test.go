@@ -1,16 +1,13 @@
 package tasks
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"image"
 	"image/png"
-	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -143,198 +140,6 @@ func TestImageOnlyHistoryReady(t *testing.T) {
 	}
 }
 
-// The subprocess substitutes only SSH/SFTP; it never contacts a host or model.
-func TestImageTransportHelper(t *testing.T) {
-	kind := os.Getenv("TASKS_IMAGE_HELPER")
-	if kind == "" {
-		return
-	}
-	home := os.Getenv("TASKS_IMAGE_REMOTE_HOME")
-	mode := os.Getenv("TASKS_IMAGE_MODE")
-	marker := os.Getenv("TASKS_IMAGE_MARKER")
-	record := func(s string) {
-		f, _ := os.OpenFile(marker, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
-		if f != nil {
-			fmt.Fprintln(f, s)
-			_ = f.Close()
-		}
-	}
-	last := os.Args[len(os.Args)-1]
-	if kind == "sftp" {
-		record("upload")
-		scanner := bufio.NewScanner(os.Stdin)
-		for scanner.Scan() {
-			line := scanner.Text()
-			// Test-generated paths have no spaces/escapes; real OpenSSH quoting has
-			// a separate standalone SFTP-server test below.
-			fields := strings.Fields(line)
-			if len(fields) != 3 {
-				os.Exit(2)
-			}
-			a, b := strings.Trim(fields[1], "\""), strings.Trim(fields[2], "\"")
-			if fields[0] == "put" {
-				data, err := os.ReadFile(a)
-				if err != nil {
-					os.Exit(2)
-				}
-				if err := os.WriteFile(b, data, 0600); err != nil {
-					os.Exit(2)
-				}
-				if mode == "upload-failed" {
-					os.Exit(1)
-				}
-			} else if fields[0] == "rename" {
-				if os.Rename(a, b) != nil {
-					os.Exit(2)
-				}
-			} else {
-				os.Exit(2)
-			}
-		}
-		os.Exit(0)
-	}
-	p := endpoints.Config{Host: "love", Account: "agent", CodexHome: home}
-	switch last {
-	case "_capabilities":
-		host := "love"
-		if mode == "wrong-host" {
-			host = "other"
-		}
-		protocol := tasksProtocol
-		if mode == "old" {
-			protocol--
-		}
-		_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"tasks_protocol": protocol, "host": host, "account": "agent"})
-	case "_images":
-		b, _ := io.ReadAll(os.Stdin)
-		var req imageRequest
-		_ = json.Unmarshal(b, &req)
-		record(req.Action)
-		os.Exit(runImages(p, bytes.NewReader(b), os.Stdout))
-	case "_remote":
-		record("submit")
-		var req remoteRequest
-		if json.NewDecoder(os.Stdin).Decode(&req) != nil || len(req.Options.Images) != 1 || validateImageFiles(req.Options.Images) != nil {
-			os.Exit(2)
-		}
-		if !strings.HasPrefix(req.Options.Images[0], imageRoot(p)+"/") {
-			os.Exit(2)
-		}
-		if mode == "unknown" {
-			os.Exit(255)
-		}
-		r := Result{OperationID: req.Options.OperationID, Action: req.Options.Action, Host: "love", Account: "agent", Outcome: "started", InputAccepted: true}
-		if mode == "rejected" {
-			r.Outcome = "failed"
-			r.InputAccepted = false
-			r.Error = "rejected"
-		}
-		_ = json.NewEncoder(os.Stdout).Encode(r)
-	default:
-		os.Exit(2)
-	}
-	os.Exit(0)
-}
-
-func TestRemoteImageDelivery(t *testing.T) {
-	for _, mode := range []string{"success", "upload-failed", "unknown", "rejected", "old", "wrong-host"} {
-		t.Run(mode, func(t *testing.T) {
-			bin := t.TempDir()
-			local := t.TempDir()
-			remote := t.TempDir()
-			marker := filepath.Join(t.TempDir(), "calls")
-			for _, kind := range []string{"ssh", "sftp"} {
-				script := "#!/bin/sh\nTASKS_IMAGE_HELPER=" + kind + " exec '" + strings.ReplaceAll(os.Args[0], "'", "'\\''") + "' -test.run=^TestImageTransportHelper$ -- \"$@\"\n"
-				if err := os.WriteFile(filepath.Join(bin, kind), []byte(script), 0700); err != nil {
-					t.Fatal(err)
-				}
-			}
-			t.Setenv("PATH", bin)
-			t.Setenv("TASKS_IMAGE_MODE", mode)
-			t.Setenv("TASKS_IMAGE_REMOTE_HOME", remote)
-			t.Setenv("TASKS_IMAGE_MARKER", marker)
-			p := endpoints.Config{Host: "xps", Account: "andre", CodexHome: local, Targets: []endpoints.Target{{Host: "love", Account: "agent", Alias: "love"}}}
-			source := testPNG(t, t.TempDir())
-			o := opts("create", "")
-			o.Host = "love"
-			o.Projectless = true
-			o.Images = []string{source}
-			r := Result{OperationID: o.OperationID, Action: o.Action, Outcome: "ok"}
-			err := executeAt(context.Background(), p, o, &r)
-			calls, _ := os.ReadFile(marker)
-			entries, _ := os.ReadDir(imageRoot(endpoints.Config{CodexHome: remote}))
-			switch mode {
-			case "success":
-				if err != nil || !r.InputAccepted || len(entries) != 1 || string(calls) != "prepare\nupload\nsubmit\n" {
-					t.Fatal(r, err, string(calls), len(entries))
-				}
-			case "unknown":
-				if err == nil || r.Outcome != "unknown" || len(entries) != 1 || string(calls) != "prepare\nupload\nsubmit\n" {
-					t.Fatal(r, err, string(calls), len(entries))
-				}
-			case "upload-failed":
-				if err == nil || r.Outcome != "failed" || len(entries) != 0 || string(calls) != "prepare\nupload\nremove\n" {
-					t.Fatal(r, err, string(calls), len(entries))
-				}
-			case "rejected":
-				if len(entries) != 0 || string(calls) != "prepare\nupload\nsubmit\nremove\n" {
-					t.Fatal(r, err, string(calls), len(entries))
-				}
-			default:
-				if err == nil || len(entries) != 0 || len(calls) != 0 {
-					t.Fatal(r, err, string(calls), len(entries))
-				}
-			}
-			localEntries, _ := os.ReadDir(imageRoot(p))
-			if len(localEntries) != 0 {
-				t.Fatal("local transport snapshots leaked")
-			}
-			if _, err := os.Stat(source); err != nil {
-				t.Fatal("source deleted")
-			}
-		})
-	}
-}
-
-func TestSFTPBatchWithRealLocalServer(t *testing.T) {
-	server := ""
-	for _, path := range []string{"/usr/lib/ssh/sftp-server", "/usr/lib/openssh/sftp-server"} {
-		if _, err := os.Stat(path); err == nil {
-			server = path
-			break
-		}
-	}
-	sftp, err := exec.LookPath("sftp")
-	if server == "" || err != nil {
-		t.Skip("existing OpenSSH SFTP tools unavailable")
-	}
-	bin := t.TempDir()
-	log := filepath.Join(bin, "sftp.log")
-	script := "#!/bin/sh\nexec '" + sftp + "' -q -D '" + server + "' -b - 2>'" + log + "'\n"
-	if err := os.WriteFile(filepath.Join(bin, "sftp"), []byte(script), 0700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", bin)
-	sourceDir := filepath.Join(t.TempDir(), "spaces [brackets] * ? \"quote\" \\slash")
-	dest := filepath.Join(t.TempDir(), "remote [directory] space")
-	_ = os.Mkdir(sourceDir, 0700)
-	_ = os.Mkdir(dest, 0700)
-	source := testPNG(t, sourceDir)
-	remote, err := uploadImages(context.Background(), "unused", dest, []string{source})
-	if err != nil {
-		b, _ := os.ReadFile(log)
-		t.Fatalf("%v: %s", err, b)
-	}
-	a, _ := os.ReadFile(source)
-	b, err := os.ReadFile(remote[0])
-	if err != nil || !bytes.Equal(a, b) {
-		t.Fatal("transfer corrupted", err)
-	}
-	if _, err := sftpPath("/bad\npath"); err == nil {
-		t.Fatal("accepted batch injection")
-	}
-}
-
 func TestClipboardImageAndDraftCleanup(t *testing.T) {
 	bin := t.TempDir()
 	source := testPNG(t, t.TempDir())
@@ -390,21 +195,6 @@ func TestClipboardImageAndDraftCleanup(t *testing.T) {
 }
 
 func TestImageStagingIdentityAndBounds(t *testing.T) {
-	p := endpoints.Config{Host: "love", Account: "agent", CodexHome: t.TempDir()}
-	for _, req := range []imageRequest{
-		{Host: "wrong", Account: "agent", Action: "prepare"},
-		{Host: "love", Account: "wrong", Action: "prepare"},
-		{Host: "love", Account: "agent", Action: "remove", Directory: p.CodexHome},
-	} {
-		b, _ := json.Marshal(req)
-		var out bytes.Buffer
-		if code := runImages(p, bytes.NewReader(b), &out); code != 2 {
-			t.Fatal("unsafe staging accepted", req)
-		}
-	}
-	if _, err := os.Stat(imageRoot(p)); !os.IsNotExist(err) {
-		t.Fatal("identity mismatch mutated files")
-	}
 	var out bytes.Buffer
 	w := imageWriter{w: &out, n: maxImageBytes - 1}
 	if _, err := w.Write([]byte("xx")); err == nil || out.Len() != 0 {

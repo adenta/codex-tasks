@@ -28,7 +28,9 @@ codex-tasks read TASK_ID --target grace/agent --limit 20
 Output is English by default. Use `--json` for scripts. `find` includes archives;
 `--archive active` or `--archive archived` narrows it. Follow every returned cursor
 needed for the search. Report searched sources, unavailable sources, and remaining
-pages. A missing result in incomplete coverage does not mean the task is absent.
+pages. Coverage is limited to the tasks exposed by the stock server. A missing
+result does not establish that a hidden task is absent. Old search cursors must
+be discarded; restart without --cursor.
 When multiple tasks or locations match, obtain a task ID and target selection
 before acting. Keep original titles, project IDs, and workspace paths as returned.
 Project IDs and paths belong to the owning machine/account.
@@ -39,8 +41,9 @@ SSH alias. `--target local` selects the executing CLI's OS account and restricts
 `find` to that account; it does not refer to the desktop when the CLI runs remotely.
 Do not combine these selectors or change identities,
 permissions, or SSH configuration to bypass missing access. Destination identity
-and protocol are verified before remote dispatch. CLI access depends on the
-account’s task index and existing app-server socket; report actual access or
+is verified through stock command/exec before remote mutations. The local CLI
+connects to stock codex app-server proxy over SSH; remote codex-tasks is not needed.
+All task access uses the running app server, including find; report actual access or
 connection failures rather than assuming desktop accounts are unsupported.
 Preserve native `hostId` values exactly: native `local` identifies the desktop
 runtime's host, not necessarily the machine executing the agent's shell.
@@ -136,3 +139,7 @@ and waits up to ten seconds for readable accepted input; it does not mean the
 turn completed. `targets` prints local and remote endpoints without network requests;
 the local entry has `local: true` and its actual hostname/account.
 The optional Omarchy popup is documented in ui/omarchy/README.md.
+
+Setup logs and activity are stored on the invoking computer. Worktree, workspace,
+and attachment_directory paths belong to the destination. No direct task database
+reads, remote helper installation, or private protocol negotiation is used.

@@ -10,7 +10,7 @@ import (
 var commandHelp = map[string]string{
 	"environments": `environments --cwd DIRECTORY
 List .codex/environments/*.toml in the selected destination checkout. CWD must be
-absolute. Does not run scripts or require an app-server connection. JSON includes
+absolute. Requires the running server; does not run setup scripts. JSON includes
 environment_git and environments (id filename, name, optional error). Non-Git
 directories return no environments; malformed files are listed as unavailable.
 Version 1 TOML is supported, including multiline setup scripts and OS overrides.
@@ -33,8 +33,9 @@ The local entry has local: true and the actual OS hostname/account.`,
 Search IDs, codex://threads/UUID links, titles and previews on configured sources.
 Includes archives by default; limit 20 per source (1–100), scan bound 1000 entries.
 Follow every next_cursor with unchanged query, filters and selectors. Coverage
-may be incomplete even when a match is found. Reads the canonical SQLite index
-with committed WAL visible; does not require a running server.
+may be incomplete even when a match is found. Uses stock thread/list and exact
+thread/read; requires the running server and covers only tasks it exposes.
+Old search cursors are invalid; restart the search without --cursor.
 Example: codex-tasks find --query 'review permissions' --target server/agent`,
 	"projects": `projects [--limit N] [--cursor CURSOR]
 List saved projects and all roots on the target account. Unavailable roots are
@@ -73,7 +74,7 @@ Omitting --environment skips setup; --checkout and non-Git directories cannot us
 Failure retains the worktree and returns setup_status, setup_exit_code when known,
 and up to 8 KiB of readable setup_output. A lost reply is unknown and never replayed.
 Inspect before retrying; scripts may have side effects. setup_log_path names a
-private destination file under CODEX_HOME/codex-tasks/setup-logs. Streamed output
+private invoking-computer file under CODEX_HOME/codex-tasks/setup-logs. Streamed output
 is captured up to 1 MiB per stream and 2 MiB per log plus metadata; line breaks
 are preserved. Logs older than seven days expire on the next nonempty setup.
 Output is not stored in the activity log. Scripts should avoid printing secrets.
@@ -137,15 +138,17 @@ Example configuration on your desktop:
   "targets": [{"host":"server","account":"agent","ssh_alias":"my-server"}]
 }
 Use the real remote hostname/account and an existing SSH alias. One account per
-host. Install the same codex-tasks binary on PATH on selected remote accounts.
+host. Remote accounts need stock codex on PATH, not codex-tasks.
 Optional local "codex_home" and "socket" are absolute paths. CODEX_HOME overrides
 codex_home; otherwise ~/.codex. Default socket is
-CODEX_HOME/app-server-control/app-server-control.sock. Remote paths are resolved
-by the remote helper's own configuration, never copied from the caller.
+CODEX_HOME/app-server-control/app-server-control.sock. Remote connections run
+ssh <alias> codex app-server proxy. Each target can optionally set an absolute
+"socket" path for proxy --sock; otherwise Codex uses its default socket.
+The server reports its Codex home; command/exec verifies host/account identity.
 No SSH configuration, login, service or app-server lifecycle changes are made.
 For connection failures verify the alias/account and running server with its
-owner. The CLI never starts a replacement server. Incompatible helpers must be
-updated manually. No task recreation or automatic mutation retry is attempted.`,
+owner. The CLI never starts a replacement server. Unsupported stock methods
+fail explicitly. No task recreation or automatic mutation retry is attempted.`,
 }
 
 const commonHelp = `
@@ -160,14 +163,14 @@ prefer a file/stdin for multiline messages. --wait defaults to 0s, maximum 60s.
 Images: create/message accept repeatable --image FILE, always a caller-local path,
 including for remote tasks. Text is optional with images. PNG/JPEG only, at most
 8 images, 10 MiB and 40 megapixels each, 40 MiB combined. Remote images use the
-existing SSH alias and installed sftp client; all uploads finish before submission.
-Remote helpers must advertise image support; no automatic update or retry occurs.
+stock fs/writeFile over the existing SSH connection; uploads finish before submission.
+No remote codex-tasks installation or private protocol is used.
 Private copies under CODEX_HOME/codex-tasks/attachments are retained on acceptance
 or uncertain delivery; files older than 7 days are removed on the next staging or
 clipboard capture. Caller-owned source files are never deleted. Image operations
 allow up to 2 extra minutes for staging/transfer. History text omits image content.
 Runtime actions attach to an existing account-owned Unix app-server socket.
-Find, environments, activity, targets and models can operate without a running server. Native tools remain
+Activity, targets and models can operate without a running server. Native tools remain
 necessary for desktop-only tasks and handoff; the optional skill prefers native
 helpers and uses this CLI when those helpers are unavailable or insufficient.
 JSON metadata and outcomes: see docs/contract.md. Unknown/partial results retain

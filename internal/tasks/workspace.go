@@ -4,10 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 )
 
 type Project struct {
@@ -21,14 +18,14 @@ type Project struct {
 	} `json:"roots"`
 }
 
-func projectAvailability(project *Project) {
+func (s *service) projectAvailability(ctx context.Context, project *Project) {
 	project.Unavailable = true
 	for _, root := range project.Roots {
 		if !filepath.IsAbs(root.Path) {
 			continue
 		}
-		if info, err := os.Stat(root.Path); err == nil && info.IsDir() {
-			_, gitErr := git(context.Background(), root.Path, "rev-parse", "--show-toplevel")
+		if info, err := s.stat(ctx, root.Path, true); err == nil && info.IsDir() {
+			_, gitErr := s.git(ctx, root.Path, "rev-parse", "--show-toplevel")
 			project.IsGit = gitErr == nil
 			project.Unavailable = false
 			project.Reason = ""
@@ -38,26 +35,17 @@ func projectAvailability(project *Project) {
 	project.Reason = "No saved project root is an accessible directory on this machine/account."
 }
 
-func git(ctx context.Context, cwd string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", cwd}, args...)...)
-	b, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("git %s failed in %s", args[0], cwd)
-	}
-	return strings.TrimSpace(string(b)), nil
-}
-
-func sameWorkspace(ctx context.Context, a, b string) bool {
-	a, ea := filepath.EvalSymlinks(a)
-	b, eb := filepath.EvalSymlinks(b)
+func (s *service) sameWorkspace(ctx context.Context, a, b string) bool {
+	a, ea := s.realpath(ctx, a)
+	b, eb := s.realpath(ctx, b)
 	if ea != nil || eb != nil {
 		return false
 	}
 	if a == b {
 		return true
 	}
-	ga, ea := git(ctx, a, "rev-parse", "--path-format=absolute", "--git-common-dir")
-	gb, eb := git(ctx, b, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	ga, ea := s.git(ctx, a, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	gb, eb := s.git(ctx, b, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	return ea == nil && eb == nil && ga == gb
 }
 
@@ -73,7 +61,7 @@ func (s *service) project(ctx context.Context, o Options) (string, error) {
 			return "", err
 		}
 		for _, root := range reply.Project.Roots {
-			if sameWorkspace(ctx, root.Path, o.CWD) {
+			if s.sameWorkspace(ctx, root.Path, o.CWD) {
 				return reply.Project.ID, nil
 			}
 		}
@@ -90,7 +78,7 @@ func (s *service) project(ctx context.Context, o Options) (string, error) {
 		}
 		for _, project := range page.Data {
 			for _, root := range project.Roots {
-				if !sameWorkspace(ctx, root.Path, o.CWD) {
+				if !s.sameWorkspace(ctx, root.Path, o.CWD) {
 					continue
 				}
 				if matched != "" && matched != project.ID {
@@ -124,47 +112,49 @@ func (s *service) project(ctx context.Context, o Options) (string, error) {
 }
 
 func (s *service) workspace(ctx context.Context, o Options) (string, bool, error) {
-	info, err := os.Stat(o.CWD)
+	info, err := s.stat(ctx, o.CWD, true)
 	if err != nil || !info.IsDir() {
 		return "", false, fmt.Errorf("workspace must be an existing directory")
 	}
-	sourceRoot, err := git(ctx, o.CWD, "rev-parse", "--show-toplevel")
+	sourceRoot, err := s.git(ctx, o.CWD, "rev-parse", "--show-toplevel")
 	if err != nil {
-		// Only a confirmed non-repository takes the plain directory path.
-		if _, lookupErr := exec.LookPath("git"); lookupErr != nil {
-			return "", false, fmt.Errorf("git is required to determine workspace isolation")
+		isGit, e := s.environmentRepository(ctx, o.CWD)
+		if e != nil {
+			return "", false, e
 		}
-		cmd := exec.CommandContext(ctx, "git", "-C", o.CWD, "rev-parse", "--show-toplevel")
-		b, _ := cmd.CombinedOutput()
-		if strings.Contains(string(b), "not a git repository") && o.Ref == "" {
+		if !isGit && o.Ref == "" {
 			return o.CWD, false, nil
 		}
 		return "", false, err
 	}
+
 	if o.Checkout {
 		return o.CWD, false, nil
 	}
 	ref := o.Ref
 	if ref == "" {
-		ref, err = git(ctx, o.CWD, "symbolic-ref", "refs/remotes/origin/HEAD")
+		ref, err = s.git(ctx, o.CWD, "symbolic-ref", "refs/remotes/origin/HEAD")
 		if err != nil {
 			return "", false, fmt.Errorf("default Git branch is unavailable; specify --ref or explicitly use --checkout")
 		}
 	}
-	commit, err := git(ctx, o.CWD, "rev-parse", "--verify", "--end-of-options", ref+"^{commit}")
+	commit, err := s.git(ctx, o.CWD, "rev-parse", "--verify", "--end-of-options", ref+"^{commit}")
 	if err != nil {
 		return "", false, err
 	}
 	root := filepath.Join(s.home, "worktrees", "codex-tasks-"+o.OperationID)
-	if err := os.MkdirAll(root, 0700); err != nil {
+	if err := s.mkdir(ctx, root, true); err != nil {
 		return "", false, err
 	}
 	path := filepath.Join(root, filepath.Base(o.CWD))
-	if _, err := git(ctx, o.CWD, "worktree", "add", "--detach", "--", path, commit); err != nil {
-		_ = os.Remove(root)
+	if _, err := s.git(ctx, o.CWD, "worktree", "add", "--detach", "--", path, commit); err != nil {
+		if s.uncertain {
+			return path, true, err
+		}
+		_ = s.remove(ctx, root, false)
 		return "", false, err
 	}
-	if err := copyLocalOverride(ctx, sourceRoot, path); err != nil {
+	if err := s.copyLocalOverride(ctx, sourceRoot, path); err != nil {
 		return path, true, fmt.Errorf("prepare override in retained worktree %s: %w", path, err)
 	}
 	return path, true, nil
@@ -178,14 +168,14 @@ func (s *service) create(ctx context.Context, o Options, r *Result) error {
 	o.Model = model
 	var environment *environmentConfig
 	if o.Environment != "" {
-		isGit, err := environmentRepository(ctx, o.CWD)
+		isGit, err := s.environmentRepository(ctx, o.CWD)
 		if err != nil {
 			return err
 		}
 		if !isGit || o.Checkout {
 			return fmt.Errorf("environment setup requires a new Git worktree")
 		}
-		environment, err = readEnvironment(o.CWD, o.Environment)
+		environment, err = s.readEnvironment(ctx, o.CWD, o.Environment)
 		if err != nil {
 			return err
 		}
@@ -193,7 +183,7 @@ func (s *service) create(ctx context.Context, o Options, r *Result) error {
 	generated := ""
 	if o.Projectless && o.CWD == "" {
 		var err error
-		generated, err = newProjectlessWorkspace()
+		generated, err = s.newProjectlessWorkspace(ctx)
 		if err != nil {
 			return err
 		}
@@ -255,8 +245,8 @@ func (s *service) create(ctx context.Context, o Options, r *Result) error {
 		if owned && environment == nil && errors.As(err, &rejected) {
 			// Remove only our own clean, unattached worktree after a definite
 			// rejection. On uncertainty preserve it for inspection.
-			if _, cleanup := git(ctx, o.CWD, "worktree", "remove", "--", workspace); cleanup == nil {
-				_ = os.Remove(filepath.Dir(workspace))
+			if _, cleanup := s.git(ctx, o.CWD, "worktree", "remove", "--", workspace); cleanup == nil {
+				_ = s.remove(ctx, filepath.Dir(workspace), false)
 				r.Worktree = ""
 			}
 		}

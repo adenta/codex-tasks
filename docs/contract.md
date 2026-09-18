@@ -1,7 +1,7 @@
 # Task tools v2 contract
 
-English is the default presentation. `--json` returns one result object; private
-SSH dispatch uses the same result schema independently of presentation. Task and
+English is the default presentation. `--json` returns one client-side result object.
+Both local and remote targets use the stock app-server API. Task and
 turn status are observations, separate from the command's `outcome`.
 
 | Field | Meaning |
@@ -19,7 +19,7 @@ turn status are observations, separate from the command's `outcome`.
 | `projects` | `id`, `name`, all `roots`; `unavailable` and `reason` when none is accessible on the executing account |
 | `environments`, `environment_git` | Environment discovery: filename `id`, display `name`, optional validation `error`; whether the project is Git |
 | `setup_status`, `setup_exit_code`, `setup_output` | Selected environment setup: `completed`, `failed`, `timed_out`, or `unknown`; exit code when known and readable captured diagnostic tail up to 8 KiB |
-| `setup_log_path` | Private destination-host setup log under `CODEX_HOME/codex-tasks/setup-logs`; 1 MiB capture per stream, 2 MiB file plus metadata, seven-day retention cleaned at next setup |
+| `setup_log_path` | Private invoking-computer setup log under `CODEX_HOME/codex-tasks/setup-logs`; 1 MiB capture per stream, 2 MiB file plus metadata, seven-day retention cleaned at next setup |
 | `created`, `input_accepted` | Known side effects, retained if subsequent setup/observation fails |
 | `turn_id`, `turn_status`, `attention` | Turn observation and UI action needed |
 | `error_category`, `error` | Specific category and bounded explanation |
@@ -28,27 +28,30 @@ turn status are observations, separate from the command's `outcome`.
 
 Optional empty fields may be omitted. Task metadata uses upstream camelCase;
 codex-tasks result metadata uses snake_case. Clients should tolerate additional fields.
-Private remote requests require protocol 6 and an exact destination account;
-the private read-only handshake returns `tasks_protocol`, `host`, `account`, and `build_id`. This is internal, not a new public capability
-command or desktop-control interface.
-Protocol versions must match exactly; mismatches fail before any upload or task
-action. Launcher, image, and provider support are part of the protocol, with no
-per-feature negotiation or fallback. Image requests carry an `images` array of absolute receiving-host paths; image bytes
-travel over SFTP before the ordinary request, never in the JSON envelope. The
-internal `_images` staging helper checks the expected host/account before
-allocating or removing a private staging directory. Old helpers are rejected
-before uploads or task submission. `_clipboard-image`, `_import-image`, and `_discard-images` are
-local launcher helpers; they do not modify tasks or require a running server.
+Remote connections run stock `codex app-server proxy` over the configured SSH
+alias. The proxy carries raw WebSocket bytes. Only stock app-server JSON-RPC
+requests cross the connection; no remote codex-tasks helper or private protocol
+exists. An optional target `socket` selects proxy's `--sock`. The server reports
+its Codex home during initialization. Stock `command/exec` verifies server
+host/account before mutation; mismatches stop the operation.
 
-Find coverage statuses are `complete`, `more`, and `unavailable`. `found` does not imply complete coverage. `ambiguous`
-counts matches over continued pages. `not_found` is only returned for a completed
-selected search. Limit is per configured source (default 20, maximum 100). A source
-scans at most 1000 canonical index entries before returning a continuation.
-The existing read-only resolver includes committed WAL and rejects path escapes.
-Discovery does not require a running app server on an otherwise accessible configured
-account; subsequent runtime actions report their own availability.
-ID keyset pagination stays stable across title and update-time changes. Search is a bounded observation, not a snapshot of
-all machines at one instant.
+Attachments use stock `fs/writeFile` with base64 file bytes after local validation.
+`attachment_directory` reports retained destination copies. Worktree/workspace
+paths are destination paths; setup logs and activity belong to the invoking
+computer. `_clipboard-image`, `_import-image`, and `_discard-images` remain local
+launcher helpers and do not require a running server.
+
+Find coverage statuses are `complete`, `more`, and `unavailable`. Coverage describes
+only what the running server exposes. `found` does not imply complete coverage;
+`not_found` means the selected server search completed, not that no hidden task
+exists. Exact IDs use `thread/read`; archive membership is derived from its
+server-reported rollout path when present, otherwise explicit archive filters
+are resolved through `thread/list`. General search scans active and archived
+`thread/list` pages with client-side title/preview matching. A source scans at
+most 1000 entries per call. Limits remain per source (default 20, maximum 100).
+Pagination uses upstream opaque cursors and is a bounded observation, not a
+snapshot. Old database-search cursors are rejected: restart without `--cursor`.
+No task database or rollout is read directly, even for local targets.
 
 Read scans at most 200 upstream items per call, one item per upstream page, so
 filtered messages and plans count accurately against the result limit. History
@@ -58,11 +61,9 @@ cursor for long-item reads, not the page's next cursor. Diagnostic items count
 against the same limit and character bound; reasoning stays omitted.
 
 Failure categories include `route_unavailable`, `unsupported_operation`,
-`transport_unavailable`, `remote_incompatible`, `destination_mismatch`,
+`transport_unavailable`, `destination_mismatch`,
 `server_rejected`, `transport_uncertain`, `observation_unavailable`, and
-`operation_failed`, `invalid_image`, `image_upload_failed`, and `environment_setup_failed`. SSH diagnostics retain at most 2048 bytes internally and
-expose only recognized transport reasons or a bounded process error. Arbitrary
-remote stderr is not returned. Exit 0 means the command returned successfully
+`operation_failed`, `invalid_image`, `image_upload_failed`, and `environment_setup_failed`. Remote stderr is discarded; errors describe the connection or stock RPC rejection. Exit 0 means the command returned successfully
 (including incomplete discovery); 1 means failed/partial operation; 2 means
 invalid arguments; 3 means an uncertain mutation. Inspect side-effect flags and
 known IDs before retrying. No mutation is replayed automatically.

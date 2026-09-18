@@ -3,7 +3,9 @@
 Optional Quickshell plugin for the codex-tasks CLI. Uses stock Omarchy controls
 and theme tokens. No extra daemon, Codex modifications, or local worker.
 
-Install the current CLI on this desktop and its configured remote accounts.
+Install the current CLI on this desktop. Remote accounts need only stock Codex.
+The modal calls the local CLI, which connects directly to the stock app server
+through SSH and `codex app-server proxy`.
 Copy this directory (excluding tests) into
 `~/.config/omarchy/plugins/adenta.codex-tasks/`, then add
 `{"id":"adenta.codex-tasks"}` to the existing `plugins` array in
@@ -34,11 +36,10 @@ images are allowed (10 MiB and 40 megapixels each, 40 MiB combined). Attachments
 with the draft when changing targets, reopening during delivery, or reviewing a
 failed/uncertain result. Sending is blocked while clipboard capture is pending.
 
-Local tasks receive private file copies. Remote tasks upload via the installed
-OpenSSH `sftp` client and selected SSH alias before submitting once. Both CLI
-copies must support images; older remote helpers are rejected before upload or
-task creation. No software is installed automatically. Missing clipboard/SFTP
-tools or unsupported image formats produce an error.
+Attachments are uploaded through stock Codex file operations before submitting
+once. No SFTP or remote codex-tasks installation is required. No software is
+installed automatically. Missing clipboard tools or unsupported images produce
+an error.
 
 Draft image files are deleted on removal, dismissal, or confirmed successful
 delivery. Receiving copies are retained for accepted/uncertain delivery. Managed
@@ -70,13 +71,13 @@ server requirements may reject it. The later task's permissions are unaffected.
 There is no fallback to the SSH subprocess runner. The modal shows preparation status;
 background sends still close immediately and notify after delivery. A failed setup
 retains the worktree and displays its path, readable diagnostic output, and a setup
-log path on the destination host. Nonempty setup runs stream to private mode-0600
+log path on this desktop. Nonempty setup runs stream to private mode-0600
 files under `CODEX_HOME/codex-tasks/setup-logs`. Capture is limited to 1 MiB per stream
 and 2 MiB per log plus metadata. Logs older than seven days expire on the next
 nonempty setup; script output is not written to the activity log. Inspect failures
 before creating again; the retained submission cannot be resent from the modal.
-No environment editing or action buttons are provided. CLI helpers on both ends
-must support protocol 6; incompatible peers are rejected before creation.
+No environment editing or action buttons are provided. Destination operations
+use stock file and command methods; unsupported methods fail explicitly.
 
 Opening uses cached project choices with a background refresh. A host change
 loads that host's cache and refreshes it. No typing-triggered requests or polling.
@@ -121,16 +122,9 @@ out after 15 seconds and do not handle credentials or route inference.
 
 The destination account must already have a configured `openrouter` provider.
 Selecting a model passes its ID, provider, and advertised context size through
-`codex-tasks create`. Both local and remote CLI must support provider selection;
-older helpers are rejected before creation. No automatic provider fallback or
+`codex-tasks create` and the stock app-server API. No automatic provider fallback or
 resubmission occurs. Ordinary subscription tasks and Credits are unchanged.
 
-For OpenRouter models, an **Effort** dropdown appears next to Inference. Target
-and Project become narrower while Inference retains its width. Options are
-Default plus the model's advertised reasoning effort levels. Default preserves
-the destination's configured behavior; it does not force OpenRouter's default.
-Each fresh draft and model change resets effort to Default. Failed or pending
-submissions retain the chosen effort. No preference is saved. Models without
-advertised levels show a disabled selector with an explanatory tooltip.
-Old catalog caches receive one automatic metadata refresh attempt; use Refresh
-to retry after a failure. Both local and remote helpers must use protocol 6.
+For OpenRouter models, the Effort selector offers Default and advertised reasoning
+levels. Default preserves destination configuration. Fresh drafts and model changes
+reset it; failed submissions retain it. It uses the stock app-server interface.

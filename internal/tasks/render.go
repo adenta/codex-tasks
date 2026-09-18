@@ -32,7 +32,10 @@ func render(w io.Writer, r Result, asJSON bool) {
 		fmt.Fprintln(w, r.SetupOutput)
 	}
 	if r.SetupLogPath != "" {
-		fmt.Fprintln(w, "Setup log on "+location+":", r.SetupLogPath)
+		fmt.Fprintln(w, "Setup log on this computer:", r.SetupLogPath)
+	}
+	if r.AttachmentDirectory != "" {
+		fmt.Fprintln(w, "Attachments on "+location+":", clean(r.AttachmentDirectory, 1000))
 	}
 	if r.Action == "find" {
 		if len(r.Tasks) == 0 {

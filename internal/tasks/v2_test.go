@@ -2,12 +2,10 @@ package tasks
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -99,79 +97,6 @@ func TestHistoryDiagnosticsBoundedAndSparsePages(t *testing.T) {
 	r = Result{}
 	if err := s.items(context.Background(), o, &r); err != nil || len(r.Items) != 1 || !r.Items[0].Truncated || len(r.Items[0].Text) != 10 {
 		t.Fatalf("%+v %v", r, err)
-	}
-}
-
-func TestFindCanonicalIndexArchivesPaginationAndMissingRoots(t *testing.T) {
-	home := t.TempDir()
-	db, err := sql.Open("sqlite", filepath.Join(home, "state_5.sqlite"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	// Keep WAL uncheckpointed: discovery must include committed WAL rows.
-	for _, q := range []string{"PRAGMA journal_mode=WAL", "PRAGMA wal_autocheckpoint=0", `CREATE TABLE threads (id TEXT PRIMARY KEY, name TEXT, title TEXT, cwd TEXT, project_id TEXT, preview TEXT, first_user_message TEXT, archived INTEGER)`} {
-		if _, err := db.Exec(q); err != nil {
-			t.Fatal(err)
-		}
-	}
-	ids := []string{"00000000-0000-4000-8000-000000000003", "00000000-0000-4000-8000-000000000002", "00000000-0000-4000-8000-000000000001"}
-	for i, id := range ids {
-		if _, err := db.Exec(`INSERT INTO threads VALUES (?, 'Review', 'old preview', '/missing/workspace', 'project', 'permissions', '', ?)`, id, i%2); err != nil {
-			t.Fatal(err)
-		}
-	}
-	p, _ := fixtureAccount("grace", "agent", "/home/agent")
-	p.CodexHome = home
-	local := opts("find", "")
-	local.Query = ids[0]
-	result := Result{}
-	if err := executeLocal(context.Background(), p, local, &result); err != nil || len(result.Tasks) != 1 {
-		t.Fatalf("discovery required a running daemon: %+v %v", result, err)
-	}
-	s := service{home: home}
-	o := opts("find", "")
-	o.Query = "review permissions"
-	o.Limit = 1
-	var all []Task
-	for pages := 0; pages < 4; pages++ {
-		r := Result{}
-		if err := s.find(context.Background(), o, &r); err != nil {
-			t.Fatal(err)
-		}
-		all = append(all, r.Tasks...)
-		o.Cursor = r.NextCursor
-		if o.Cursor == "" {
-			break
-		}
-	}
-	if len(all) != 3 || all[0].ID != ids[0] || !all[1].Archived || all[0].Name != "Review" || all[0].CWD != "/missing/workspace" {
-		t.Fatal(all)
-	}
-	o.Cursor = ""
-	o.Query = "codex://threads/" + ids[1]
-	r := Result{}
-	if err := s.find(context.Background(), o, &r); err != nil || len(r.Tasks) != 1 || !r.Tasks[0].Archived {
-		t.Fatal(r, err)
-	}
-	o.Archive = "active"
-	r = Result{}
-	if err := s.find(context.Background(), o, &r); err != nil || len(r.Tasks) != 0 {
-		t.Fatal(r, err)
-	}
-	// Discovery must never create an absent database or follow one outside home.
-	s.home = t.TempDir()
-	if err := s.find(context.Background(), o, &Result{}); err == nil {
-		t.Fatal("missing index treated as absence")
-	}
-	if _, err := os.Stat(filepath.Join(s.home, "state_5.sqlite")); !os.IsNotExist(err) {
-		t.Fatal("created index")
-	}
-	if err := os.Symlink(filepath.Join(home, "state_5.sqlite"), filepath.Join(s.home, "state_5.sqlite")); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.find(context.Background(), o, &Result{}); err == nil {
-		t.Fatal("followed index outside home")
 	}
 }
 
@@ -270,32 +195,6 @@ func TestV2SelectorsAndDestinationRejection(t *testing.T) {
 	if err := executeAt(context.Background(), p, o, &r); err == nil || r.ErrorCategory != "route_unavailable" {
 		t.Fatal(r, err)
 	}
-	o.Target = ""
-	o.Host = "grace"
-	b, _ := json.Marshal(remoteRequest{Version: tasksProtocol, Account: "andre", Options: o})
-	var out strings.Builder
-	if code := runRemote(context.Background(), p, nil, strings.NewReader(string(b)), &out); code != 2 || out.Len() != 0 {
-		t.Fatal(code, out.String())
-	}
-}
-
-func TestDestinationHandshakeBlocksMutation(t *testing.T) {
-	dir := t.TempDir()
-	marker := filepath.Join(dir, "mutation")
-	script := "#!/bin/sh\nfor arg do last_arg=$arg; done\nif [ \"$last_arg\" = _capabilities ]; then printf '%s\\n' '{\"tasks_protocol\":6,\"host\":\"love\",\"account\":\"wrong\"}'; exit 0; fi\nprintf x > '" + marker + "'\n"
-	if err := os.WriteFile(filepath.Join(dir, "ssh"), []byte(script), 0700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", dir)
-	o := opts("message", storedTask().ID)
-	o.Host = "love"
-	r := Result{Account: "agent"}
-	if err := dispatch(context.Background(), "love", o, &r); err == nil || r.ErrorCategory != "destination_mismatch" {
-		t.Fatal(r, err)
-	}
-	if _, err := os.Stat(marker); !os.IsNotExist(err) {
-		t.Fatal("sent mutation")
-	}
 }
 
 func TestPartialCreationEnglishAndDiagnostics(t *testing.T) {
@@ -307,11 +206,7 @@ func TestPartialCreationEnglishAndDiagnostics(t *testing.T) {
 	if r.Outcome != "partial" || !strings.Contains(out.String(), "Task created; setup is incomplete") || !strings.Contains(out.String(), task.ID) {
 		t.Fatal(r, out.String())
 	}
-	var b diagnosticBuffer
-	b.Write([]byte(strings.Repeat("SECRET", 1000) + "\x1b[31m"))
-	if len(b.data) != 2048 || strings.Contains(b.message(errors.New("exit status 255")), "SECRET") {
-		t.Fatal("unsafe diagnostic")
-	}
+
 }
 
 func TestProjectsKeepUnavailableAndInspectEveryRoot(t *testing.T) {

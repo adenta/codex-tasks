@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -20,7 +19,6 @@ import (
 )
 
 const maxMessage = 1 << 20
-const remoteLimit = 8 << 20 // accounts for JSON escaping of a 1 MiB prompt
 const help = `Usage: codex-tasks OPERATION [TASK] [OPTIONS]
   models [--json] [--refresh]
   environments --cwd DIRECTORY
@@ -335,9 +333,7 @@ func Run(paths endpoints.Config, args []string, stdin io.Reader, stdout, stderr 
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
-	if args[0] == "_images" && len(args) == 1 {
-		return runImages(paths, stdin, stdout)
-	}
+
 	if args[0] == "_clipboard-image" && len(args) == 1 {
 		ctx, done := context.WithTimeout(ctx, 10*time.Second)
 		defer done()
@@ -375,16 +371,6 @@ func Run(paths endpoints.Config, args []string, stdin io.Reader, stdout, stderr 
 		}
 		_ = json.NewEncoder(stdout).Encode(map[string]any{"targets": targets, "desktop_projects": desktopProjects(paths)})
 		return 0
-	}
-	if args[0] == "_capabilities" {
-		if len(args) != 1 {
-			return 2
-		}
-		_ = json.NewEncoder(stdout).Encode(map[string]any{"tasks_protocol": tasksProtocol, "build_id": buildinfo.BuildID, "host": string(paths.Host), "account": paths.Account})
-		return 0
-	}
-	if args[0] == "_remote" {
-		return runRemote(ctx, paths, args[1:], stdin, stdout)
 	}
 	o, err := parse(args, stdin)
 	if err != nil {
@@ -480,149 +466,6 @@ func setError(r *Result, err error) {
 			r.ErrorCategory = "server_rejected"
 		}
 	}
-}
-
-func executeLocal(ctx context.Context, p endpoints.Config, o Options, r *Result) error {
-	r.Host, r.Account = string(p.Host), p.Account
-	if o.Action == "environments" {
-		return listEnvironments(ctx, o.CWD, r)
-	}
-	if o.Action == "find" {
-		return (&service{home: p.CodexHome}).find(ctx, o, r)
-	}
-	c, err := Dial(ctx, p.SocketPath())
-	if err != nil {
-		r.ErrorCategory = "transport_unavailable"
-		return err
-	}
-	defer c.Close()
-	s := service{rpc: c, client: c, home: p.CodexHome}
-	err = s.execute(ctx, o, r)
-	if s.uncertain {
-		r.Outcome, r.ErrorCategory = "unknown", "transport_uncertain"
-	} else if err != nil && r.InputAccepted {
-		r.Outcome, r.ErrorCategory = "unknown", "observation_unavailable"
-	}
-	return err
-}
-
-func connection(p endpoints.Config, target string) (string, string, error) {
-	for _, c := range p.Targets {
-		if strings.EqualFold(c.Host, target) && c.Alias != "" {
-			return c.Alias, c.Account, nil
-		}
-	}
-	return "", "", fmt.Errorf("no configured connection to %s", clean(target, 80))
-}
-
-type remoteRequest struct {
-	Version int     `json:"version"`
-	Account string  `json:"account"`
-	Options Options `json:"options"`
-}
-
-func dispatch(ctx context.Context, alias string, o Options, r *Result) error {
-	if r.Account == "" {
-		return fmt.Errorf("expected destination account is required")
-	}
-	if err := checkRemoteTasks(ctx, alias, strings.ToLower(o.Host), r.Account, r); err != nil {
-		r.Outcome = "failed"
-		return err
-	}
-	if len(o.Images) > 0 {
-		req := imageRequest{Host: strings.ToLower(o.Host), Account: r.Account, Action: "prepare"}
-		reply, err := remoteImages(ctx, alias, req)
-		if err != nil {
-			r.Outcome = "failed"
-			return err
-		}
-		if !filepath.IsAbs(reply.Directory) || !strings.HasPrefix(filepath.Base(reply.Directory), "send-") {
-			r.Outcome = "failed"
-			return fmt.Errorf("invalid remote attachment directory; no task was submitted")
-		}
-		// Never delete files after an uncertain submission. Cleanup of known
-		// failures gets its own bounded context, even if the upload timed out.
-		defer func() {
-			if r.Outcome != "unknown" && !r.InputAccepted {
-				cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancel()
-				req.Action, req.Directory = "remove", reply.Directory
-				_, _ = remoteImages(cleanup, alias, req)
-			}
-		}()
-		o.Images, err = uploadImages(ctx, alias, reply.Directory, o.Images)
-		if err != nil {
-			r.Outcome = "failed"
-			r.ErrorCategory = "image_upload_failed"
-			return err
-		}
-	}
-	b, _ := json.Marshal(remoteRequest{Version: tasksProtocol, Account: r.Account, Options: o})
-	cmd := exec.CommandContext(ctx, "ssh", "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-o", "StrictHostKeyChecking=yes", "--", alias, endpoints.Command, "_remote")
-	cmd.Stdin = strings.NewReader(string(b))
-	// Bound transport output, including noise from remote shell startup files.
-	var output limitedBuffer
-	cmd.Stdout = &output
-	var diagnostic diagnosticBuffer
-	cmd.Stderr = &diagnostic
-	err := cmd.Run()
-	var reply Result
-	if json.Unmarshal(output.data, &reply) == nil && reply.OperationID == o.OperationID && reply.Action == o.Action && reply.Host == strings.ToLower(o.Host) && reply.Account == r.Account && reply.Outcome != "" {
-		*r = reply
-		return nil
-	}
-	r.Outcome, r.ErrorCategory = "unknown", "transport_uncertain"
-	if o.Action == "find" || o.Action == "list" || o.Action == "read" || o.Action == "projects" || o.Action == "progress" || o.Action == "environments" {
-		r.Outcome, r.ErrorCategory = "failed", "transport_unavailable"
-		return fmt.Errorf("remote read failed: %s", diagnostic.message(err))
-	}
-	if err == nil {
-		return fmt.Errorf("remote response was invalid; inspect the target before retrying")
-	}
-	return fmt.Errorf("remote dispatch outcome is unknown: %s; inspect the target before retrying", diagnostic.message(err))
-}
-
-type limitedBuffer struct{ data []byte }
-
-func (b *limitedBuffer) Write(p []byte) (int, error) {
-	if len(b.data)+len(p) > remoteLimit {
-		return 0, fmt.Errorf("remote output exceeds limit")
-	}
-	b.data = append(b.data, p...)
-	return len(p), nil
-}
-
-func runRemote(ctx context.Context, p endpoints.Config, args []string, stdin io.Reader, stdout io.Writer) int {
-	if len(args) != 0 {
-		return 2
-	}
-	var request remoteRequest
-	decoder := json.NewDecoder(io.LimitReader(stdin, remoteLimit))
-	decoder.DisallowUnknownFields()
-	if decoder.Decode(&request) != nil || request.Version != tasksProtocol {
-		return 2
-	}
-	if err := validate(request.Options); err != nil {
-		return 2
-	}
-	o := request.Options
-	if request.Account != p.Account || o.Target != "" || o.Action == "activity" || (o.Host != "" && !strings.EqualFold(o.Host, string(p.Host))) {
-		return 2
-	}
-	if o.TaskID != "" {
-		o.TaskID, _ = taskID(o.TaskID)
-	}
-	r := Result{OperationID: o.OperationID, Host: string(p.Host), Account: p.Account, Action: o.Action, Outcome: "ok"}
-	if err := validateImageFiles(o.Images); err != nil {
-		setError(&r, err)
-		_ = json.NewEncoder(stdout).Encode(r)
-		return 0
-	}
-	opCtx, cancel := context.WithTimeout(ctx, operationTimeout(o))
-	defer cancel()
-	setError(&r, executeLocal(opCtx, p, o, &r))
-	_ = json.NewEncoder(stdout).Encode(r)
-	return 0
 }
 
 func showActivity(ctx context.Context, p endpoints.Config, o Options, stdout, stderr io.Writer) int {

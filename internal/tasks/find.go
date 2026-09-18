@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/adenta/codex-tasks/internal/endpoints"
-	"github.com/adenta/codex-tasks/internal/taskstate"
 )
 
 // Explicit kinds avoid the upstream interactive-only default; empty providers
@@ -24,7 +23,11 @@ type Coverage struct {
 	Detail string `json:"detail,omitempty"`
 }
 type findPosition struct {
-	LastID string `json:"last_id,omitempty"`
+	Version  int    `json:"version"`
+	Cursor   string `json:"cursor"`
+	Archived bool   `json:"archived"`
+	Query    string `json:"query"`
+	Archive  string `json:"archive"`
 }
 type findCursor struct {
 	Version int               `json:"version"`
@@ -47,75 +50,87 @@ func decodeCursor(s string, v any) error {
 	return nil
 }
 
-// The runtime list hides some indexed tasks (including new forks). Discovery
-// reads the canonical index with the existing WAL-aware, contained, read-only
-// resolver. Task bodies and all controls still go through the existing runtime.
-// Stable ID keysets avoid offset skips when titles or update times change.
+// Search uses only stock task methods. Coverage is limited to the server's view.
 func (s *service) find(ctx context.Context, o Options, r *Result) error {
-	pos := findPosition{}
+	pos := findPosition{Version: 2, Archived: o.Archive == "archived", Query: o.Query, Archive: o.Archive}
 	if o.Cursor != "" {
+		pos = findPosition{}
 		if err := decodeCursor(o.Cursor, &pos); err != nil {
 			return err
 		}
-		if _, err := taskID(pos.LastID); err != nil {
-			return fmt.Errorf("invalid search position")
+		if pos.Version != 2 || pos.Query != o.Query || pos.Archive != o.Archive {
+			return fmt.Errorf("search cursor is obsolete or belongs to another query; restart the search without --cursor")
 		}
 	}
-	db, err := taskstate.OpenReadOnly(ctx, s.home)
-	if err != nil {
-		return fmt.Errorf("canonical task index unavailable: %w", err)
-	}
-	defer db.Close()
-	query := `SELECT id, COALESCE(NULLIF(name, ''), title, ''), cwd,
-  COALESCE(project_id, ''), COALESCE(NULLIF(preview, ''), first_user_message, ''), archived
-  FROM threads WHERE (? = '' OR id < ?)`
-	args := []any{pos.LastID, pos.LastID}
-	switch o.Archive {
-	case "active":
-		query += " AND archived = 0"
-	case "archived":
-		query += " AND archived = 1"
-	}
 	id, idErr := taskID(o.Query)
-	if idErr == nil {
-		query += " AND id = ?"
-		args = append(args, id)
+	if idErr == nil && o.Cursor == "" {
+		task, err := s.thread(ctx, id)
+		if err != nil {
+			return err
+		}
+		if o.Archive == "" || o.Archive == "all" || task.Path != "" {
+			if o.Archive == "" || o.Archive == "all" || (o.Archive == "archived") == task.Archived {
+				r.Tasks = append(r.Tasks, task)
+			}
+			return nil
+		}
+		// thread/read does not report archive membership. Resolve explicit archive
+		// filters through the corresponding thread/list scope.
 	}
-	query += " ORDER BY id DESC LIMIT 1001"
-	rows, err := db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return fmt.Errorf("canonical task index schema is incompatible: %w", err)
-	}
-	defer rows.Close()
 	words := strings.Fields(strings.ToLower(o.Query))
-	scanned := 0
-	for rows.Next() {
-		// Fetch one lookahead row to distinguish completion from remaining work.
-		if scanned >= 1000 || len(r.Tasks) >= o.Limit {
+	for scanned, pages := 0, 0; scanned < 1000 && pages < 1000; pages++ {
+		remaining := o.Limit - len(r.Tasks)
+		if remaining <= 0 {
 			r.NextCursor = encodeCursor(pos)
 			return nil
 		}
-		var task Task
-		if err := rows.Scan(&task.ID, &task.Name, &task.CWD, &task.ProjectID, &task.Preview, &task.Archived); err != nil {
+		if remaining > 100 {
+			remaining = 100
+		}
+		if remaining > 1000-scanned {
+			remaining = 1000 - scanned
+		}
+		var page struct {
+			Data       []Task `json:"data"`
+			NextCursor string `json:"nextCursor"`
+		}
+		err := s.call(ctx, "thread/list", map[string]any{"limit": remaining, "cursor": nullable(pos.Cursor), "archived": pos.Archived, "sortKey": "created_at", "sourceKinds": allTaskSources, "modelProviders": []string{}, "useStateDbOnly": true}, &page, false)
+		if err != nil {
 			return err
 		}
-		pos.LastID = task.ID
-		scanned++
-		match := true
-		if idErr != nil {
-			text := strings.ToLower(task.Name + "\n" + task.Preview)
-			for _, word := range words {
-				if !strings.Contains(text, word) {
-					match = false
-					break
+		for _, task := range page.Data {
+			scanned++
+			match := true
+			if idErr == nil {
+				match = task.ID == id
+			} else {
+				value := strings.ToLower(task.Name + "\n" + task.Preview)
+				for _, word := range words {
+					if !strings.Contains(value, word) {
+						match = false
+						break
+					}
 				}
 			}
+			if match {
+				task.Archived = pos.Archived
+				r.Tasks = append(r.Tasks, task)
+			}
 		}
-		if match {
-			r.Tasks = append(r.Tasks, task)
+		if page.NextCursor != "" && page.NextCursor == pos.Cursor {
+			return fmt.Errorf("task pagination did not advance")
+		}
+		pos.Cursor = page.NextCursor
+		if page.NextCursor == "" {
+			if !pos.Archived && (o.Archive == "" || o.Archive == "all") {
+				pos.Archived = true
+			} else {
+				return nil
+			}
 		}
 	}
-	return rows.Err()
+	r.NextCursor = encodeCursor(pos)
+	return nil
 }
 
 type executor func(context.Context, endpoints.Config, Options, *Result) error
@@ -124,13 +139,14 @@ func discover(ctx context.Context, p endpoints.Config, o Options, r *Result, exe
 	o = localTarget(p, o)
 	encoded, _ := json.Marshal(p)
 	scope := fmt.Sprintf("%s/%s|%s|%s|%x", p.Host, p.Account, o.Host, o.Target, sha256.Sum256(encoded))
-	state := findCursor{Version: 1, Query: o.Query, Archive: o.Archive, Scope: scope, Sources: map[string]string{}}
+	state := findCursor{Version: 2, Query: o.Query, Archive: o.Archive, Scope: scope, Sources: map[string]string{}}
 	if o.Cursor != "" {
+		state = findCursor{}
 		if err := decodeCursor(o.Cursor, &state); err != nil {
 			return err
 		}
-		if state.Version != 1 || state.Query != o.Query || state.Archive != o.Archive || state.Scope != scope || state.Sources == nil || state.Matches < 0 {
-			return fmt.Errorf("cursor belongs to another find query, filter, or account")
+		if state.Version != 2 || state.Query != o.Query || state.Archive != o.Archive || state.Scope != scope || state.Sources == nil || state.Matches < 0 {
+			return fmt.Errorf("search cursor is obsolete or belongs to another query, filter, or account; restart the search without --cursor")
 		}
 	}
 	var sources []Coverage

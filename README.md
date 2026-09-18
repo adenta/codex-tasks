@@ -14,14 +14,18 @@ to use an installed binary.
 - Linux, with access to an existing stock Codex app server's Unix socket.
 - Tested against Codex **0.154.0**. Experimental protocol methods are used;
   compatibility with other versions is not guaranteed.
-- Git for workspace creation; OpenSSH and the same CLI on the remote account's
-  PATH for remote commands. Configure existing SSH aliases.
+- Git and standard Linux utilities for workspace creation; OpenSSH on the client
+  and stock `codex` on the remote account's PATH. Configure existing SSH aliases.
 - Existing Codex authentication belongs to the server. No new API key is needed.
 
 This utility never starts or manages an app server, changes login or SSH
 configuration, or writes the task index/history directly. Desktop-only task
-access and cross-host handoff still need native helpers. `find` can read the
-canonical task index while the server is unavailable.
+access and cross-host handoff still need native helpers. All task access, including
+`find`, uses the running stock app server; there are no direct database reads.
+
+The connection is **modal → local codex-tasks → stock Codex app server**. Remote
+targets use `ssh <alias> codex app-server proxy` to carry the stock WebSocket
+connection. No remote codex-tasks installation or private protocol is required.
 
 ## Build and install manually
 
@@ -35,9 +39,9 @@ go build -trimpath -o build/codex-tasks ./cmd/codex-tasks
 ```
 
 When ready to install, copy `build/codex-tasks` into an existing user bin directory
-on PATH. Repeat on each account where you want to run commands, including remote
-accounts. Remote peers must use the same protocol version; mismatches fail before
-any task action. Nothing installs automatically; no service or fleet tooling is included.
+on PATH on the computer invoking commands (the desktop for the modal). Remote
+servers need stock Codex, not another copy of codex-tasks. Nothing installs
+automatically; no service or fleet tooling is included.
 `make dist` builds a local Linux archive and checksum without publishing it.
 
 Optionally copy `skills/codex-tasks` into your Codex skills directory. The skill
@@ -61,14 +65,17 @@ to restrict `find` to local tasks. For remote access create
 
 `server` is the actual remote hostname, `agent` its OS account, and `my-server`
 an existing SSH alias. Configure
-one destination account per host. Identity is checked before remote dispatch.
+one destination account per host. Server host/account identity is checked through
+stock `command/exec` before destination mutations.
 No named hosts are built in.
 
-Remote paths are read from the remote helper's configuration. Optional local
+The server reports its Codex home during initialization. Optional local
 `codex_home` and `socket` fields accept absolute paths. `$CODEX_HOME` overrides
 `codex_home`; the default socket is
 `CODEX_HOME/app-server-control/app-server-control.sock`. This is an attachment
-point for the existing server, not a socket owned by this utility.
+point for the existing server, not a socket owned by this utility. A target can
+optionally set an absolute `"socket"` path, passed to stock proxy's `--sock`;
+otherwise the proxy uses Codex's default socket on that account.
 
 ```sh
 codex-tasks help config
@@ -100,11 +107,10 @@ codex-tasks create --host server --cwd /absolute/repo --message-file brief.txt -
 ```
 
 PNG and JPEG are supported: at most eight images, 10 MiB and 40 megapixels per
-image, and 40 MiB combined. The CLI snapshots files privately, verifies the remote
-host/account and image capability, then uploads over the existing SSH alias using
-the installed `sftp` client. The SSH server must support SFTP in the same filesystem
-as the remote CLI. All uploads finish before a task is created or messaged. There
-is no upload service, base64 transport, automatic update, or automatic retry.
+image, and 40 MiB combined. The CLI snapshots caller files privately, verifies the
+server identity, and uploads through stock `fs/writeFile` (base64 file content).
+All uploads finish before a task is created or messaged. No SFTP or remote helper
+is needed. No task submission is automatically retried.
 
 Copies live under `CODEX_HOME/codex-tasks/attachments` on the receiving account.
 Accepted and uncertain submissions retain their files; entries older than seven
@@ -116,6 +122,10 @@ of an uncertain task must precede any retry. CLI history text omits image conten
 ## Results and recovery
 
 - Follow discovery and history cursors. An incomplete search is not proof of absence.
+  Search covers only tasks exposed by stock `thread/list` and exact `thread/read`.
+  Old database-search cursors must be discarded; restart without `--cursor`.
+- Activity and setup logs stay on the invoking computer. `setup_log_path` is local;
+  `worktree`, `workspace`, and `attachment_directory` identify destination paths.
 - Git task creation defaults to an isolated detached worktree from local
   `origin/HEAD`; use `--ref` for a selected ref or `--checkout` to use the checkout.
   Before starting the task, creation copies an ignored root `AGENTS.override.md`
@@ -155,14 +165,9 @@ See [migration and validation notes](docs/migration.md). Extracted from
 
 ## OpenRouter routing
 
-The modal offers model-specific reasoning levels in **Effort**, beside Inference.
-Each fresh draft starts at Default (no override). Direct shell callers can use
-`create --reasoning-effort VALUE`; creation verifies the returned setting before
-sending input. Local and remote CLI copies must both support protocol 6.
-
 New tasks explicitly using `--model-provider openrouter` keep the selected model
 and automatically use the shared OpenRouter preset, for example
-`deepseek/deepseek-v4.1-flash@preset/codex-tasks`. The execution host applies this
+`deepseek/deepseek-v4.1-flash@preset/codex-tasks`. The invoking CLI applies this
 once; matching suffixes are accepted and other preset suffixes are rejected.
 The preset must exist in the workspace accessible to that host's API key.
 Manage its routing preferences on OpenRouter: updates affect subsequent requests,
@@ -170,7 +175,7 @@ including existing preset-qualified tasks. Rules apply to every model using it.
 Missing-preset or inference errors never cause a retry with the plain model.
 Subscription, other providers, and existing plain-model tasks are unchanged.
 No launcher configuration or gateway is needed. To rename the shared preset,
-change `openRouterPreset` in the CLI source and deploy to execution hosts.
+change `openRouterPreset` in the CLI source and update the invoking client.
 
 ## Optional Omarchy popup
 
@@ -188,4 +193,8 @@ hostname/account, and appears as `local` in the popup's target picker.
 executing account's Documents/Codex, with work/outputs and developer instructions.
 `create --wait-history --message-file -` waits up to ten seconds for readable
 accepted input before returning `history_ready: true`; this does not wait for
-inference completion. Update remote helpers before using these options.
+inference completion.
+
+OpenRouter models with advertised reasoning levels expose an Effort selector.
+Default preserves the server's configured behavior. `create --reasoning-effort`
+sets and verifies the selected value through the stock app-server interface.

@@ -3,27 +3,28 @@ package tasks
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"time"
 )
 
-func newProjectlessWorkspace() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
+func (s *service) newProjectlessWorkspace(ctx context.Context) (string, error) {
+	home, err := s.command(ctx, "", false, "sh", "-c", `printf '%s' "$HOME"`)
+	if err != nil || !filepath.IsAbs(home) {
+		return "", fmt.Errorf("cannot resolve destination home")
 	}
 	root := filepath.Join(home, "Documents", "Codex", time.Now().Format("2006-01-02"))
-	if err = os.MkdirAll(root, 0700); err != nil {
+	if err = s.mkdir(ctx, root, true); err != nil {
 		return "", err
 	}
-	dir, err := os.MkdirTemp(root, "task-")
+	dir, err := s.command(ctx, "", true, "mktemp", "-d", filepath.Join(root, "task-XXXXXXXX"))
 	if err != nil {
 		return "", err
 	}
 	for _, name := range []string{"work", "outputs"} {
-		if err = os.Mkdir(filepath.Join(dir, name), 0700); err != nil {
-			_ = os.RemoveAll(dir)
+		if err = s.mkdir(ctx, filepath.Join(dir, name), false); err != nil {
+			if !s.uncertain {
+				_ = s.remove(ctx, dir, true)
+			}
 			return "", err
 		}
 	}

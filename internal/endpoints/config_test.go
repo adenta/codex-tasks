@@ -51,3 +51,22 @@ func TestRejectInvalidConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestTargetSocket(t *testing.T) {
+	for _, socket := range []string{"/custom/codex.sock", "relative"} {
+		path := filepath.Join(t.TempDir(), "config.json")
+		body := `{"targets":[{"host":"fixture-server","account":"agent","ssh_alias":"server","socket":"` + socket + `"}]}`
+		if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("CODEX_TASKS_CONFIG", path)
+		c, err := Load()
+		if filepath.IsAbs(socket) {
+			if err != nil || c.Targets[0].Socket != socket {
+				t.Fatal(c, err)
+			}
+		} else if err == nil {
+			t.Fatal("accepted relative socket")
+		}
+	}
+}

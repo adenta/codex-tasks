@@ -2,15 +2,12 @@ package tasks
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/adenta/codex-tasks/internal/endpoints"
 )
 
 func environmentFixture(t *testing.T, config string) string {
@@ -34,8 +31,8 @@ func environmentFixture(t *testing.T, config string) string {
 func TestEnvironmentDiscoveryAndValidation(t *testing.T) {
 	repo := environmentFixture(t, "version = 1\nname = 'Fixture'\n[setup]\nscript = '''\nprintf default\n'''\n[setup.linux]\nscript = 'printf linux'\n[[actions]]\nname = 'Ignored'\nscript = 'exit 9'\n")
 	r := Result{}
-	// Discovery is independent of the app-server socket.
-	if err := executeLocal(context.Background(), endpoints.Config{}, Options{Action: "environments", CWD: repo}, &r); err != nil {
+	// Discovery uses the stock filesystem and command methods.
+	if err := listEnvironments(context.Background(), repo, &r); err != nil {
 		t.Fatal(err)
 	}
 	if r.EnvironmentGit == nil || !*r.EnvironmentGit || len(r.Environments) != 1 || r.Environments[0].Name != "Fixture" {
@@ -171,7 +168,7 @@ func TestInvalidEnvironmentStopsBeforeCreation(t *testing.T) {
 			t.Fatal("invalid environment accepted")
 		}
 	}
-	s := service{home: t.TempDir()}
+	s := service{home: t.TempDir(), rpc: &fakeRPC{}}
 	o := opts("create", "")
 	o.CWD = t.TempDir()
 	o.Environment = "environment.toml"
@@ -230,18 +227,9 @@ func TestEnvironmentOptionsAndRemoteDiscovery(t *testing.T) {
 		}
 	}
 	repo := environmentFixture(t, "version=1\nname='Remote'\n")
-	p, _ := fixtureAccount("grace", "agent", t.TempDir())
-	o := opts("environments", "")
-	o.CWD = repo
-	o.Host = "grace"
-	b, _ := json.Marshal(remoteRequest{Version: tasksProtocol, Account: p.Account, Options: o})
-	var out strings.Builder
-	if code := runRemote(context.Background(), p, nil, strings.NewReader(string(b)), &out); code != 0 {
-		t.Fatal(code, out.String())
-	}
-	var r Result
-	if err := json.Unmarshal([]byte(out.String()), &r); err != nil || r.Error != "" || len(r.Environments) != 1 || r.Environments[0].Name != "Remote" {
-		t.Fatalf("%+v %v", r, err)
+	r := Result{}
+	if err := listEnvironments(context.Background(), repo, &r); err != nil || len(r.Environments) != 1 || r.Environments[0].Name != "Remote" {
+		t.Fatal(r, err)
 	}
 }
 
@@ -277,5 +265,13 @@ func TestSetupLogBoundsAndRetention(t *testing.T) {
 	}
 	if !strings.Contains(r.SetupOutput, "\nlast line\n") {
 		t.Fatal("tail/newlines lost")
+	}
+}
+
+func TestEnvironmentsMissingNestedDirectory(t *testing.T) {
+	repo := overrideRepo(t)
+	r := Result{}
+	if err := listEnvironments(context.Background(), repo, &r); err != nil || len(r.Environments) != 0 || r.EnvironmentGit == nil || !*r.EnvironmentGit {
+		t.Fatal(r, err)
 	}
 }

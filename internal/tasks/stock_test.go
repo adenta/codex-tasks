@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/adenta/codex-tasks/internal/endpoints"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -210,23 +212,38 @@ args = ["-c", "printf fake-command-key"]
 	created := Result{Outcome: "ok"}
 	create := func() error {
 		if !remote {
-			return s.execute(ctx, o, &created)
+			return s.executeWithImages(ctx, endpoints.Config{CodexHome: home}, o, &created)
 		}
-		paths, _ := fixtureAccount("grace", "agent", root)
-		paths.CodexHome = home
-		request, _ := json.Marshal(remoteRequest{Version: tasksProtocol, Account: paths.Account, Options: o})
-		var output strings.Builder
-		if code := runRemote(ctx, paths, nil, strings.NewReader(string(request)), &output); code != 0 {
-			return fmt.Errorf("remote creation exit %d: %s", code, output.String())
-		}
-		if err := json.Unmarshal([]byte(output.String()), &created); err != nil {
+		bin := filepath.Join(root, "bin")
+		if err := os.Mkdir(bin, 0700); err != nil {
 			return err
 		}
-		if created.Error != "" {
-			return fmt.Errorf("remote creation: %s", created.Error)
+		if err := os.Symlink(binary, filepath.Join(bin, "codex")); err != nil {
+			return err
 		}
-		return nil
+		script := "#!/bin/sh\nfor arg do last_arg=$arg; done\nexec env -i HOME=" + shellQuote(root) + " CODEX_HOME=" + shellQuote(home) + " PATH=" + shellQuote(bin+":/usr/bin:/bin") + " CODEX_SSH_SKIP_APP_SERVER_BOOT=true /bin/sh -c \"$last_arg\"\n"
+		if err := os.WriteFile(filepath.Join(bin, "ssh"), []byte(script), 0700); err != nil {
+			return err
+		}
+		t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
+		host, _ := os.Hostname()
+		account, err := user.Current()
+		if err != nil {
+			return err
+		}
+		localHome := filepath.Join(root, "client-home")
+		if err = os.Mkdir(localHome, 0700); err != nil {
+			return err
+		}
+		paths := endpoints.Config{Host: "fixture-client", Account: account.Username, CodexHome: localHome, Targets: []endpoints.Target{{Host: strings.ToLower(host), Account: account.Username, Alias: "fixture-server", Socket: socket}}}
+		o.Target = strings.ToLower(host) + "/" + account.Username
+		err = executeAt(ctx, paths, o, &created)
+		if created.SetupLogPath != "" && !strings.HasPrefix(created.SetupLogPath, localHome+"/") {
+			return fmt.Errorf("setup logs not on invoking computer")
+		}
+		return err
 	}
+
 	if err := create(); err != nil {
 		client.Close()
 		t.Fatalf("create: %v %+v", err, created)
@@ -392,8 +409,6 @@ args = ["-c", "printf fake-command-key"]
 		search.Query = "codex://threads/" + fork.Task.ID
 		found := Result{}
 		if err := s.execute(ctx, search, &found); err != nil || len(found.Tasks) != 1 || found.Tasks[0].ID != fork.Task.ID || found.Tasks[0].Archived != (action == "archive") {
-			data, _ := exec.Command("sqlite3", filepath.Join(home, "state_5.sqlite"), "select id,title,source,model_provider,archived,has_user_event from threads;").CombinedOutput()
-			t.Logf("disposable state: %s; wanted %s", data, fork.Task.ID)
 			var listed any
 			_ = s.call(ctx, "thread/list", map[string]any{"archived": action == "archive", "sourceKinds": allTaskSources, "modelProviders": []string{}, "useStateDbOnly": true}, &listed, false)
 			t.Logf("raw listing: %#v", listed)
@@ -487,8 +502,7 @@ args = ["-c", "printf fake-command-key"]
 		}
 	}
 	if !found {
-		data, _ := exec.Command("sqlite3", filepath.Join(home, "state_5.sqlite"), "select id,title,source,model_provider,has_user_event from threads;").CombinedOutput()
-		t.Fatalf("first-message task absent from persistent index: %+v; database: %s", listed.Tasks, data)
+		t.Fatalf("first-message task absent from stock task listing: %+v", listed.Tasks)
 	}
 
 }
