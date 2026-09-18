@@ -66,6 +66,25 @@ import qs.Ui
           enabled:!root.busy && !root.uncertain
           onChanged:function(value){root.mode=value;root.remember()}
         }
+        Column {
+          width:parent.width;spacing:Style.space(6);visible:root.usesNewWorktree
+          Dropdown {
+            width:parent.width;label:root.environmentsLoading ? "Environment · loading…" : "Environment"
+            value:root.environment;options:root.environmentOptions
+            enabled:!root.busy && !root.uncertain && !root.environmentsLoading && !root.environmentError
+            onChanged:function(value){root.chooseEnvironment(value)}
+          }
+          Text {
+            width:parent.width;visible:text!==""
+            text:root.environmentError || (root.selectedEnvironment ? root.selectedEnvironment.error || "" : "")
+            color:Color.popups.text;font.family:Style.font.family;font.pixelSize:Style.space(12);wrapMode:Text.Wrap
+          }
+          Button {
+            text:"Retry environment discovery";visible:root.environmentError!==""
+            enabled:!root.busy && !root.uncertain && !root.environmentsLoading
+            onClicked:root.refreshEnvironments()
+          }
+        }
         Rectangle {
           width:parent.width;height:Style.space(190);color:Color.menu.background;radius:Style.cornerRadius
           border.color:editor.activeFocus ? Color.accent : Color.popups.border
@@ -111,7 +130,13 @@ import qs.Ui
         Row {
           width:parent.width;spacing:Style.space(10);visible:root.status!==""
           QQC.BusyIndicator { width:Style.space(24);height:width;running:root.busy;visible:running }
-          Text { width:parent.width-(root.busy ? Style.space(34):0);text:root.status;color:Color.popups.text;font.family:Style.font.family;font.pixelSize:Style.space(13);wrapMode:Text.Wrap }
+          QQC.ScrollView {
+            id:statusScroll
+            width:parent.width-(root.busy ? Style.space(34):0)
+            height:Math.min(statusText.implicitHeight,Style.space(120));clip:true
+            contentWidth:availableWidth
+            Text { id:statusText;width:statusScroll.availableWidth;text:root.status;textFormat:Text.PlainText;color:Color.popups.text;font.family:Style.font.family;font.pixelSize:Style.space(13);wrapMode:Text.Wrap }
+          }
         }
         Text { width:parent.width;text:"Enter to send & open · Alt+Enter to send in background\nShift+Enter for a new line · Ctrl+V to paste text or images";color:Qt.alpha(Color.popups.text,0.6);font.family:Style.font.family;font.pixelSize:Style.space(12);wrapMode:Text.Wrap }
         Flow {

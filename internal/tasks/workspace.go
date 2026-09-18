@@ -173,6 +173,20 @@ func (s *service) create(ctx context.Context, o Options, r *Result) error {
 		return err
 	}
 	o.Model = model
+	var environment *environmentConfig
+	if o.Environment != "" {
+		isGit, err := environmentRepository(ctx, o.CWD)
+		if err != nil {
+			return err
+		}
+		if !isGit || o.Checkout {
+			return fmt.Errorf("environment setup requires a new Git worktree")
+		}
+		environment, err = readEnvironment(o.CWD, o.Environment)
+		if err != nil {
+			return err
+		}
+	}
 	generated := ""
 	if o.Projectless && o.CWD == "" {
 		var err error
@@ -196,6 +210,11 @@ func (s *service) create(ctx context.Context, o Options, r *Result) error {
 	}
 	if owned {
 		r.Worktree = workspace
+	}
+	if environment != nil {
+		if err := runEnvironmentSetup(ctx, workspace, environment, r); err != nil {
+			return err
+		}
 	}
 	params := map[string]any{"cwd": workspace, "ephemeral": false, "historyMode": "paginated", "threadSource": "agent_created_thread"}
 	if generated != "" {
@@ -223,7 +242,7 @@ func (s *service) create(ctx context.Context, o Options, r *Result) error {
 	err = s.call(ctx, "thread/start", params, &reply, true)
 	if err != nil {
 		var rejected *RPCError
-		if owned && errors.As(err, &rejected) {
+		if owned && environment == nil && errors.As(err, &rejected) {
 			// Remove only our own clean, unattached worktree after a definite
 			// rejection. On uncertainty preserve it for inspection.
 			if _, cleanup := git(ctx, o.CWD, "worktree", "remove", "--", workspace); cleanup == nil {

@@ -8,6 +8,13 @@ import (
 )
 
 var commandHelp = map[string]string{
+	"environments": `environments --cwd DIRECTORY
+List .codex/environments/*.toml in the selected destination checkout. CWD must be
+absolute. Does not run scripts or require an app-server connection. JSON includes
+environment_git and environments (id filename, name, optional error). Non-Git
+directories return no environments; malformed files are listed as unavailable.
+Version 1 TOML is supported, including multiline setup scripts and OS overrides.
+Example: codex-tasks environments --host server --cwd /path/to/repo --json`,
 	"models": `models [--json] [--refresh]
 List the public OpenRouter model catalog without credentials or endpoint configuration.
 Uses $XDG_CACHE_HOME/codex-tasks/openrouter-models.json (default
@@ -47,13 +54,24 @@ continuation_cursor, --item and next_offset; retain task/turn/output filters.
 Example: codex-tasks read TASK_UUID --limit 20 --host server`,
 	"create": `create [--cwd DIRECTORY] [--project ID | --projectless]
        [--checkout | --ref REF] [--title TITLE] [--model MODEL] [--model-provider PROVIDER]
-       [--model-context-window TOKENS]
+       [--model-context-window TOKENS] [--environment FILE.toml]
        [--mode plan|default] [--message-file FILE|-] [--image FILE ...] [--wait DURATION]
 Create a task only within the user's requested scope. CWD must be absolute on
 the target. Match or create project assignment; ambiguous roots require --project.
 Git defaults to a detached worktree from local origin/HEAD; no guessed ref or
 fetch. --ref selects a requested ref; --checkout uses the existing checkout.
 Confirmed non-Git directories are used directly. --projectless omits assignment.
+--environment selects an existing filename inside the checkout's .codex/environments
+directory. The selected configuration is read before creation, then its setup
+script runs with Bash in the new worktree on the destination before any task starts.
+The destination OS setup override replaces the default script when present.
+An empty script succeeds. Setup inherits the destination account environment, has
+no interactive stdin, and times out after 10 minutes. This runs the project's
+script directly as that account; task sandbox/approval settings do not govern it.
+Omitting --environment skips setup; --checkout and non-Git directories cannot use it.
+Failure retains the worktree and returns setup_status, setup_exit_code when known,
+and up to 8 KiB of setup_output. Inspect before retrying; scripts may have side effects.
+Setup output is not stored in the activity log. Scripts should avoid printing secrets.
 Omitted model/provider/mode preserve server defaults. Provider selection requires
 --model and an already-configured provider on the execution host. Optional
 --model-context-window supplies the custom model context limit. No credentials
@@ -142,7 +160,7 @@ or uncertain delivery; files older than 7 days are removed on the next staging o
 clipboard capture. Caller-owned source files are never deleted. Image operations
 allow up to 2 extra minutes for staging/transfer. History text omits image content.
 Runtime actions attach to an existing account-owned Unix app-server socket.
-Find, activity, targets and models can operate without a running server. Native tools remain
+Find, environments, activity, targets and models can operate without a running server. Native tools remain
 necessary for desktop-only tasks and handoff; the optional skill prefers native
 helpers and uses this CLI when those helpers are unavailable or insufficient.
 JSON metadata and outcomes: see docs/contract.md. Unknown/partial results retain

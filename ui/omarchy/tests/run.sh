@@ -17,6 +17,11 @@ QT_QPA_PLATFORM=offscreen QT_QPA_PLATFORMTHEME=generic QT_QUICK_CONTROLS_STYLE=B
 cat "$test_root/delivery.log"
 grep -q DELIVERY_FIXTURE_PASS "$test_root/delivery.log"
 ! grep -q 'Error:' "$test_root/delivery.log"
+cp "$src/tests/Environments.qml" "$test_root/shell.qml"
+QT_QPA_PLATFORM=offscreen QT_QPA_PLATFORMTHEME=generic QT_QUICK_CONTROLS_STYLE=Basic XDG_RUNTIME_DIR="$test_root" CODEX_TASKS_LAUNCHER_SETTINGS="$test_root/environments.ini" LAUNCHER_TEST_CLI="$src/tests/fake-cli.sh" timeout 15 quickshell -p "$test_root/shell.qml" >"$test_root/environments.log" 2>&1
+cat "$test_root/environments.log"
+grep -q ENVIRONMENT_FIXTURE_PASS "$test_root/environments.log"
+! grep -q 'Error:' "$test_root/environments.log"
 cp "$src/tests/Images.qml" "$test_root/shell.qml"
 ln -s "$src/tests/fake-cli.sh" "$test_root/text-clipboard"
 QT_QPA_PLATFORM=offscreen QT_QPA_PLATFORMTHEME=generic QT_QUICK_CONTROLS_STYLE=Basic XDG_RUNTIME_DIR="$test_root" CODEX_TASKS_LAUNCHER_SETTINGS="$test_root/images.ini" LAUNCHER_TEST_CLI="$src/tests/fake-cli.sh" LAUNCHER_TEST_TEXT_CLI="$test_root/text-clipboard" timeout 15 quickshell -p "$test_root/shell.qml" >"$test_root/images.log" 2>&1

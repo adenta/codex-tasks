@@ -51,6 +51,25 @@ are stored in `~/.config/codex-tasks/launcher.ini`. Prompt text is never stored.
 Grace/no project is the first-run selection. A missing server requires explicit
 selection; destinations are never silently substituted.
 
+For a new Git worktree, the Environment picker reads existing
+`.codex/environments/*.toml` files on the selected host/project. A sole environment
+is selected automatically. Multiple environments require a choice; **None** skips
+setup. Explicit choices, including None, are remembered per host/project path.
+Missing or invalid saved selections block sending until you choose again. Discovery
+errors have a retry button. Existing checkouts, non-Git folders, and projectless
+tasks do not run environment setup.
+
+The CLI reads the selected configuration from the source checkout, then runs its
+setup script with Bash in the new worktree before starting the task. Linux setup
+overrides are respected. Setup runs as the destination account with its existing
+environment, without interactive input, and has a ten-minute limit. It does not
+use the later task's sandbox/approval settings. The modal shows preparation status;
+background sends still close immediately and notify after delivery. A failed setup
+retains the worktree and displays its path and bounded diagnostic output. Inspect it
+before creating again; the retained submission cannot be resent from the modal.
+No environment editing or action buttons are provided. CLI helpers on both ends
+must support protocol 4; incompatible peers are rejected before creation.
+
 Opening uses cached project choices with a background refresh. A host change
 loads that host's cache and refreshes it. No typing-triggered requests or polling.
 Send & open sends once and waits up to ten seconds for readable user-message history

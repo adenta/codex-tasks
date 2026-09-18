@@ -12,6 +12,25 @@ func render(w io.Writer, r Result, asJSON bool) {
 		return
 	}
 	location := clean(r.Host, 80) + "/" + clean(r.Account, 80)
+	if r.Action == "environments" && r.Error == "" {
+		if len(r.Environments) == 0 {
+			fmt.Fprintln(w, "No environments found on", location)
+		}
+		for _, e := range r.Environments {
+			fmt.Fprintf(w, "%s\t%s", clean(e.ID, 200), clean(e.Name, 200))
+			if e.Error != "" {
+				fmt.Fprintf(w, "\tUnavailable: %s", clean(e.Error, 500))
+			}
+			fmt.Fprintln(w)
+		}
+		return
+	}
+	if r.SetupStatus != "" {
+		fmt.Fprintln(w, "Environment setup:", r.SetupStatus)
+	}
+	if r.SetupOutput != "" {
+		fmt.Fprintln(w, r.SetupOutput)
+	}
 	if r.Action == "find" {
 		if len(r.Tasks) == 0 {
 			fmt.Fprintln(w, "No matching tasks were returned on this page.")
