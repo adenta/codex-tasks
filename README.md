@@ -146,6 +146,20 @@ See [migration and validation notes](docs/migration.md). Extracted from
 [adenta/codex-ops](https://github.com/adenta/codex-ops), snapshot
 `ef47c97e74086501019f76671e140c9a5abaf3fa`.
 
+## OpenRouter routing
+
+New tasks explicitly using `--model-provider openrouter` keep the selected model
+and automatically use the shared OpenRouter preset, for example
+`deepseek/deepseek-v4.1-flash@preset/codex-tasks`. The execution host applies this
+once; matching suffixes are accepted and other preset suffixes are rejected.
+The preset must exist in the workspace accessible to that host's API key.
+Manage its routing preferences on OpenRouter: updates affect subsequent requests,
+including existing preset-qualified tasks. Rules apply to every model using it.
+Missing-preset or inference errors never cause a retry with the plain model.
+Subscription, other providers, and existing plain-model tasks are unchanged.
+No launcher configuration or gateway is needed. To rename the shared preset,
+change `openRouterPreset` in the CLI source and deploy to execution hosts.
+
 ## Optional Omarchy popup
 
 The public OpenRouter catalog is built into `codex-tasks models --json`.

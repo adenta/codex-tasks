@@ -168,6 +168,11 @@ func (s *service) workspace(ctx context.Context, o Options) (string, bool, error
 }
 
 func (s *service) create(ctx context.Context, o Options, r *Result) error {
+	model, err := creationModel(o.ModelProvider, o.Model)
+	if err != nil {
+		return err
+	}
+	o.Model = model
 	generated := ""
 	if o.Projectless && o.CWD == "" {
 		var err error
@@ -240,7 +245,7 @@ func (s *service) create(ctx context.Context, o Options, r *Result) error {
 	if o.Model != "" && reply.Model != o.Model {
 		return fmt.Errorf("new task did not retain requested model; no message sent")
 	}
-	if r.Task.Model == "" {
+	if reply.Model != "" {
 		r.Task.Model = reply.Model
 	}
 	if r.Task.ReasoningEffort == nil {

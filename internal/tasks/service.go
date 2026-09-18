@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -215,6 +216,12 @@ func (s *service) execute(ctx context.Context, o Options, r *Result) error {
 		return err
 	case "fork":
 		params := map[string]any{"threadId": t.ID, "excludeTurns": true, "deferGoalContinuation": true, "threadSource": "agent_created_thread"}
+		// Fork defaults may come from host configuration rather than the parent.
+		// Keep a preset-qualified parent's routing selection explicit.
+		if t.ModelProvider == "openrouter" && strings.Contains(t.Model, "@preset/") {
+			params["model"] = t.Model
+			params["modelProvider"] = t.ModelProvider
+		}
 		if t.Status.Type == "active" {
 			turn, err := s.latest(ctx, t.ID)
 			if err != nil {
@@ -226,7 +233,9 @@ func (s *service) execute(ctx context.Context, o Options, r *Result) error {
 			params["beforeTurnId"] = turn.ID
 		}
 		var reply struct {
-			Thread Task `json:"thread"`
+			Thread   Task   `json:"thread"`
+			Model    string `json:"model"`
+			Provider string `json:"modelProvider"`
 		}
 		err := s.call(ctx, "thread/fork", params, &reply, true)
 		if err != nil {
@@ -237,6 +246,12 @@ func (s *service) execute(ctx context.Context, o Options, r *Result) error {
 			return fmt.Errorf("fork response is missing its task ID")
 		}
 		r.Task, r.Outcome, r.Created = &reply.Thread, "created", true
+		if reply.Model != "" {
+			r.Task.Model = reply.Model
+		}
+		if params["model"] != nil && (reply.Model != t.Model || reply.Provider != t.ModelProvider) {
+			return fmt.Errorf("fork did not retain requested model and provider; no message sent")
+		}
 		if o.Title != "" {
 			if err := s.name(ctx, r.Task.ID, o.Title); err != nil {
 				return err

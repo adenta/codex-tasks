@@ -58,6 +58,11 @@ Omitted model/provider/mode preserve server defaults. Provider selection require
 --model and an already-configured provider on the execution host. Optional
 --model-context-window supplies the custom model context limit. No credentials
 are handled and no provider is configured by this CLI. Optional first message starts work.
+Explicit OpenRouter models use MODEL@preset/codex-tasks, applied on the execution
+host. An existing matching suffix is accepted; other presets are rejected.
+Manage routing in that OpenRouter preset; edits affect subsequent requests from
+existing preset tasks. Existing plain-model tasks and other providers are unchanged.
+Preset errors never trigger a retry without the preset.
 Title max 512 bytes. On partial/unknown preserve project/worktree/task IDs and
 inspect before another create. Never blindly replay after connection loss.
 With --projectless, omitting --cwd allocates Documents/Codex/date/task-* with work/outputs and developer instructions.

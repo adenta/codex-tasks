@@ -19,10 +19,17 @@ import (
 // Exercises the installed stock protocol with two clients, persistent history,
 // a daemon restart and a fake model. No live Codex home or credential is inherited.
 func TestStockTaskLifecycle(t *testing.T) {
-	t.Run("default-provider", func(t *testing.T) { testStockTaskLifecycle(t, false) })
-	t.Run("explicit-command-provider", func(t *testing.T) { testStockTaskLifecycle(t, true) })
+	t.Run("default-provider", func(t *testing.T) { testStockTaskLifecycle(t, "", false) })
+	t.Run("explicit-command-provider", func(t *testing.T) { testStockTaskLifecycle(t, "command_fixture", false) })
+	t.Run("openrouter-preset", func(t *testing.T) { testStockTaskLifecycle(t, "openrouter", false) })
+	t.Run("openrouter-remote", func(t *testing.T) { testStockTaskLifecycle(t, "openrouter", true) })
 }
-func testStockTaskLifecycle(t *testing.T, custom bool) {
+func testStockTaskLifecycle(t *testing.T, provider string, remote bool) {
+	custom := provider != ""
+	expectedModel := "openai/gpt-5.6-sol"
+	if provider == "openrouter" {
+		expectedModel += "@preset/codex-tasks"
+	}
 	binary := os.Getenv("CODEX_TASKS_TEST_CODEX")
 	if !filepath.IsAbs(binary) {
 		t.Skip("set CODEX_TASKS_TEST_CODEX to an absolute stock Codex binary")
@@ -68,11 +75,16 @@ func testStockTaskLifecycle(t *testing.T, custom bool) {
 		body, _ := io.ReadAll(io.LimitReader(r.Body, 4<<20))
 		mu.Lock()
 		requests = append(requests, string(body))
+		toolCall := provider == "openrouter" && len(requests) == 1
 		mu.Unlock()
 		w.Header().Set("Content-Type", "text/event-stream")
+		item := map[string]any{"id": "msg-test", "type": "message", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": "done"}}}
+		if toolCall {
+			item = map[string]any{"id": "tool-test", "type": "function_call", "call_id": "call-test", "name": "update_plan", "arguments": `{"plan":[{"step":"Mock continuation","status":"completed"}]}`}
+		}
 		for _, event := range []any{
 			map[string]any{"type": "response.created", "response": map[string]any{"id": "resp-test"}},
-			map[string]any{"type": "response.output_item.done", "item": map[string]any{"id": "msg-test", "type": "message", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": "done"}}}},
+			map[string]any{"type": "response.output_item.done", "item": item},
 			map[string]any{"type": "response.completed", "response": map[string]any{"id": "resp-test", "usage": map[string]any{"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}},
 		} {
 			b, _ := json.Marshal(event)
@@ -99,15 +111,15 @@ stream_max_retries = 0
 	initialConfig := config
 	if custom {
 		config += fmt.Sprintf(`
-[model_providers.command_fixture]
+[model_providers.%s]
 name = "Command fixture"
 base_url = %q
 wire_api = "responses"
 supports_websockets = false
-[model_providers.command_fixture.auth]
+[model_providers.%s.auth]
 command = "/bin/sh"
 args = ["-c", "printf fake-command-key"]
-`, upstream.URL+"/command/v1")
+`, provider, upstream.URL+"/command/v1", provider)
 	}
 	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(initialConfig), 0600); err != nil {
 		t.Fatal(err)
@@ -160,7 +172,7 @@ args = ["-c", "printf fake-command-key"]
 	o.Mode = "plan"
 	o.Model = "" // Use the effective configured model and reasoning.
 	if custom {
-		o.ModelProvider = "command_fixture"
+		o.ModelProvider = provider
 		o.Model = "openai/gpt-5.6-sol"
 		o.ContextWindow = 32000
 	}
@@ -168,7 +180,26 @@ args = ["-c", "printf fake-command-key"]
 	o.WaitHistory = true
 	o.Wait = 10 * time.Second
 	created := Result{Outcome: "ok"}
-	if err := s.execute(ctx, o, &created); err != nil {
+	create := func() error {
+		if !remote {
+			return s.execute(ctx, o, &created)
+		}
+		paths, _ := fixtureAccount("grace", "agent", root)
+		paths.CodexHome = home
+		request, _ := json.Marshal(remoteRequest{Version: tasksProtocol, Account: paths.Account, Options: o})
+		var output strings.Builder
+		if code := runRemote(ctx, paths, nil, strings.NewReader(string(request)), &output); code != 0 {
+			return fmt.Errorf("remote creation exit %d: %s", code, output.String())
+		}
+		if err := json.Unmarshal([]byte(output.String()), &created); err != nil {
+			return err
+		}
+		if created.Error != "" {
+			return fmt.Errorf("remote creation: %s", created.Error)
+		}
+		return nil
+	}
+	if err := create(); err != nil {
 		client.Close()
 		t.Fatalf("create: %v %+v", err, created)
 	}
@@ -184,8 +215,11 @@ args = ["-c", "printf fake-command-key"]
 	if err := os.Remove(o.Images[0]); err != nil {
 		t.Fatal(err)
 	}
-	if custom && created.Task.ModelProvider != "command_fixture" {
+	if custom && created.Task.ModelProvider != provider {
 		t.Fatalf("provider missing: %+v", created.Task)
+	}
+	if created.Task.Model != expectedModel {
+		t.Fatalf("wrong created model: %+v", created.Task)
 	}
 	id := created.Task.ID
 	message := opts("message", id)
@@ -238,19 +272,32 @@ args = ["-c", "printf fake-command-key"]
 	if err := s.execute(ctx, message, &second); err != nil {
 		t.Fatalf("cold resume: %v %+v", err, second)
 	}
-	if second.Outcome != "completed" || second.Task.Model != "openai/gpt-5.6-sol" || second.Task.ReasoningEffort == nil || *second.Task.ReasoningEffort != "high" {
+	if second.Outcome != "completed" || second.Task.Model != expectedModel || second.Task.ReasoningEffort == nil || *second.Task.ReasoningEffort != "high" {
 		t.Fatalf("cold settings/outcome: %+v", second)
 	}
-	if custom && second.Task.ModelProvider != "command_fixture" {
+	if custom && second.Task.ModelProvider != provider {
 		t.Fatalf("cold resume lost provider: %+v", second.Task)
 	}
 	mu.Lock()
 	captured := append([]string(nil), requests...)
 	mu.Unlock()
-	if len(captured) != 2 {
-		t.Fatalf("wanted exactly two fake model requests, got %d", len(captured))
+	wantRequests := 2
+	if provider == "openrouter" {
+		wantRequests++
+		if len(captured) < 2 || !strings.Contains(captured[1], "function_call_output") {
+			t.Fatal("missing mock tool continuation")
+		}
+	}
+	if len(captured) != wantRequests {
+		t.Fatalf("wanted exactly %d fake model requests, got %d", wantRequests, len(captured))
 	}
 	for i, payload := range captured {
+		var request struct {
+			Model string `json:"model"`
+		}
+		if err := json.Unmarshal([]byte(payload), &request); err != nil || request.Model != expectedModel {
+			t.Fatalf("request %d lost preset/model: %s", i, payload)
+		}
 		if !strings.Contains(payload, "Plan Mode") {
 			t.Fatalf("request %d lost Plan mode", i)
 		}
@@ -262,8 +309,31 @@ args = ["-c", "printf fake-command-key"]
 	if err := s.execute(ctx, opts("fork", id), &fork); err != nil {
 		t.Fatalf("fork: %v", err)
 	}
-	if fork.Task.ID == id || fork.Task.ProjectID != created.Task.ProjectID {
+	if fork.Task.ID == id || fork.Task.ProjectID != created.Task.ProjectID || fork.Task.Model != expectedModel {
 		t.Fatalf("fork lost identity/project: %+v", fork)
+	}
+	if provider == "openrouter" {
+		mode := opts("mode", fork.Task.ID)
+		mode.Mode = "default"
+		var changed Result
+		if err := s.execute(ctx, mode, &changed); err != nil {
+			t.Fatalf("fork mode change: %v", err)
+		}
+		followup := opts("message", fork.Task.ID)
+		followup.Message, followup.Wait = "Continue the fork.", 10*time.Second
+		var continued Result
+		if err := s.execute(ctx, followup, &continued); err != nil || continued.Outcome != "completed" {
+			t.Fatalf("fork continuation: %v %+v", err, continued)
+		}
+		mu.Lock()
+		payload := requests[len(requests)-1]
+		mu.Unlock()
+		var request struct {
+			Model string `json:"model"`
+		}
+		if err := json.Unmarshal([]byte(payload), &request); err != nil || request.Model != expectedModel {
+			t.Fatalf("fork/mode change lost model: %s", payload)
+		}
 	}
 	for _, action := range []string{"archive", "unarchive"} {
 		r := Result{Outcome: "ok"}
