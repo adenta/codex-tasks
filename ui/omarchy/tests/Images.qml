@@ -47,12 +47,16 @@ ShellRoot {
         break
       case 4:
         check(!app.images.length && app.message==="" && app.taskId==="image-id","successful delivery kept draft")
-        app.open("{}");app.pasteClipboard()
+        app.open("{}");app.inference="fixture/model";app.modelProviders=({"fixture/model":"openrouter_together"});app.message="routed";app.send(true)
         break
       case 5:
-        app.message="uncertain";app.send(true)
+        check(app.taskId==="routed-id","mapped provider did not reach CLI")
+        app.open("{}");app.pasteClipboard()
         break
       case 6:
+        app.message="uncertain";app.send(true)
+        break
+      case 7:
         app.open("{}")
         check(app.images.length===1 && app.uncertain && !app.canSend,"uncertain image delivery lost recovery")
         app.removeImage(0)
@@ -61,12 +65,12 @@ ShellRoot {
         check(!app.images.length,"dismiss did not discard draft")
         app.open("{}");app.pasteClipboard();app.dismiss();app.open("{}")
         break
-      case 7:
+      case 8:
         check(!app.images.length,"late clipboard result contaminated new draft")
         app.cli=Quickshell.env("LAUNCHER_TEST_TEXT_CLI")
         app.pasteClipboard()
         break
-      case 8:
+      case 9:
         check(textPastes===1 && !app.images.length,"text clipboard did not use normal paste")
         app.dismiss()
         console.log("IMAGE_FIXTURE_PASS");Qt.quit()

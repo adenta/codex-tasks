@@ -9,4 +9,18 @@ function rows(models, favorites, query) {
   rest.forEach(function(m,i){result.push({id:m.id,name:m.name,unavailable:false,favorite:false,heading:i===0?"All models":""})})
   return result
 }
-if (typeof module !== "undefined") module.exports={rows:rows}
+function parseModelProviders(raw) {
+  var parsed = JSON.parse(raw)
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("expected a JSON object")
+  Object.keys(parsed).forEach(function(id) {
+    var provider = parsed[id]
+    if (!id || /\s/.test(id) || typeof provider !== "string" || !provider || provider.length > 128 || /\s/.test(provider))
+      throw new Error("expected exact model IDs mapped to nonempty provider IDs without whitespace")
+  })
+  return parsed
+}
+function mappedProvider(mapping, id) {
+  return Object.prototype.hasOwnProperty.call(mapping, id) ? mapping[id] : ""
+}
+function providerFor(mapping, id) { return mappedProvider(mapping, id) || "openrouter" }
+if (typeof module !== "undefined") module.exports={rows:rows,parseModelProviders:parseModelProviders,mappedProvider:mappedProvider,providerFor:providerFor}

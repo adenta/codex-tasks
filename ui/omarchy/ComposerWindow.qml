@@ -48,7 +48,7 @@ import qs.Ui
           width:parent.width;spacing:Style.space(12);enabled:!root.busy && !root.uncertain
           Dropdown { width:(parent.width-2*parent.spacing)*0.23;label:"Target";value:root.host;options:root.servers;onChanged:function(value){root.changeHost(value)} }
           SearchableDropdown { width:(parent.width-2*parent.spacing)*0.37;label:root.refreshing ? "Project · refreshing…" : "Project";value:root.projectId;options:root.projectOptions;onChanged:function(value){root.projectId=value;root.remember();root.status=""} }
-          InferenceDropdown { width:(parent.width-2*parent.spacing)*0.40;value:root.inference;models:root.inferenceModels;favorites:root.favorites;refreshing:root.catalogRefreshing;refreshedAt:root.catalogRefreshedAt;warning:root.catalogWarning;onChanged:function(value){root.inference=value;root.status=""};onFavoriteToggled:function(value){root.toggleFavorite(value)};onRefreshRequested:root.refreshCatalog(true) }
+          InferenceDropdown { width:(parent.width-2*parent.spacing)*0.40;value:root.inference;models:root.inferenceModels;modelProviders:root.modelProviders;favorites:root.favorites;refreshing:root.catalogRefreshing;refreshedAt:root.catalogRefreshedAt;warning:root.catalogWarning;onChanged:function(value){root.inference=value;root.status=""};onFavoriteToggled:function(value){root.toggleFavorite(value)};onRefreshRequested:root.refreshCatalog(true) }
         }
         Dropdown {
           width:parent.width;visible:root.selectedProject!==null && root.selectedProject.isGitRepository!==false
@@ -93,6 +93,7 @@ import qs.Ui
             }
           }
         }
+        Text { width:parent.width;visible:root.modelProvidersError!=="";text:root.modelProvidersError;color:Color.popups.text;font.family:Style.font.family;font.pixelSize:Style.space(13);wrapMode:Text.Wrap }
         Row {
           width:parent.width;spacing:Style.space(10);visible:root.status!==""
           QQC.BusyIndicator { width:Style.space(24);height:width;running:root.busy;visible:running }
