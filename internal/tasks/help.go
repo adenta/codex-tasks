@@ -34,14 +34,18 @@ Follow next_cursor even on empty pages. For truncated items use that item's
 continuation_cursor, --item and next_offset; retain task/turn/output filters.
 Example: codex-tasks read TASK_UUID --limit 20 --host server`,
 	"create": `create [--cwd DIRECTORY] [--project ID | --projectless]
-       [--checkout | --ref REF] [--title TITLE] [--model MODEL]
+       [--checkout | --ref REF] [--title TITLE] [--model MODEL] [--model-provider PROVIDER]
+       [--model-context-window TOKENS]
        [--mode plan|default] [--message-file FILE|-] [--wait DURATION]
 Create a task only within the user's requested scope. CWD must be absolute on
 the target. Match or create project assignment; ambiguous roots require --project.
 Git defaults to a detached worktree from local origin/HEAD; no guessed ref or
 fetch. --ref selects a requested ref; --checkout uses the existing checkout.
 Confirmed non-Git directories are used directly. --projectless omits assignment.
-Omitted model/mode preserve server defaults. Optional first message starts work.
+Omitted model/provider/mode preserve server defaults. Provider selection requires
+--model and an already-configured provider on the execution host. Optional
+--model-context-window supplies the custom model context limit. No credentials
+are handled and no provider is configured by this CLI. Optional first message starts work.
 Title max 512 bytes. On partial/unknown preserve project/worktree/task IDs and
 inspect before another create. Never blindly replay after connection loss.
 With --projectless, omitting --cwd allocates Documents/Codex/date/task-* with work/outputs and developer instructions.

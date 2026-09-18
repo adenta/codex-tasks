@@ -202,6 +202,13 @@ func (s *service) create(ctx context.Context, o Options, r *Result) error {
 	if o.Model != "" {
 		params["model"] = o.Model
 	}
+	if o.ModelProvider != "" {
+		params["modelProvider"] = o.ModelProvider
+		params["serviceTier"] = "default"
+	}
+	if o.ContextWindow > 0 {
+		params["config"] = map[string]any{"model_context_window": o.ContextWindow}
+	}
 	var reply struct {
 		Thread   Task    `json:"thread"`
 		Model    string  `json:"model"`
@@ -226,6 +233,13 @@ func (s *service) create(ctx context.Context, o Options, r *Result) error {
 		return fmt.Errorf("create response is missing its task ID; inspect before retrying")
 	}
 	r.Task, r.Outcome, r.Created = &reply.Thread, "created", true
+	r.Task.ModelProvider = reply.Provider
+	if o.ModelProvider != "" && reply.Provider != o.ModelProvider {
+		return fmt.Errorf("new task did not retain requested provider; no message sent")
+	}
+	if o.Model != "" && reply.Model != o.Model {
+		return fmt.Errorf("new task did not retain requested model; no message sent")
+	}
 	if r.Task.Model == "" {
 		r.Task.Model = reply.Model
 	}

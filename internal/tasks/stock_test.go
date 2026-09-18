@@ -19,6 +19,10 @@ import (
 // Exercises the installed stock protocol with two clients, persistent history,
 // a daemon restart and a fake model. No live Codex home or credential is inherited.
 func TestStockTaskLifecycle(t *testing.T) {
+	t.Run("default-provider", func(t *testing.T) { testStockTaskLifecycle(t, false) })
+	t.Run("explicit-command-provider", func(t *testing.T) { testStockTaskLifecycle(t, true) })
+}
+func testStockTaskLifecycle(t *testing.T, custom bool) {
 	binary := os.Getenv("CODEX_TASKS_TEST_CODEX")
 	if !filepath.IsAbs(binary) {
 		t.Skip("set CODEX_TASKS_TEST_CODEX to an absolute stock Codex binary")
@@ -54,6 +58,13 @@ func TestStockTaskLifecycle(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
+		expectedKey := "Bearer fake-key"
+		if custom && strings.Contains(r.URL.Path, "/command/") {
+			expectedKey = "Bearer fake-command-key"
+		}
+		if r.Header.Get("Authorization") != expectedKey {
+			t.Errorf("wrong authentication for selected provider")
+		}
 		body, _ := io.ReadAll(io.LimitReader(r.Body, 4<<20))
 		mu.Lock()
 		requests = append(requests, string(body))
@@ -85,7 +96,20 @@ supports_websockets = false
 request_max_retries = 0
 stream_max_retries = 0
 `, upstream.URL+"/v1")
-	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(config), 0600); err != nil {
+	initialConfig := config
+	if custom {
+		config += fmt.Sprintf(`
+[model_providers.command_fixture]
+name = "Command fixture"
+base_url = %q
+wire_api = "responses"
+supports_websockets = false
+[model_providers.command_fixture.auth]
+command = "/bin/sh"
+args = ["-c", "printf fake-command-key"]
+`, upstream.URL+"/command/v1")
+	}
+	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(initialConfig), 0600); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -119,6 +143,12 @@ stream_max_retries = 0
 		return stop
 	}
 	stop := start()
+	// New providers must be picked up without restarting an existing server.
+	if custom {
+		if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(config), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	client, err := Dial(ctx, socket)
 	if err != nil {
 		t.Fatal(err)
@@ -129,6 +159,11 @@ stream_max_retries = 0
 	o.Title = "Persisted lifecycle fixture"
 	o.Mode = "plan"
 	o.Model = "" // Use the effective configured model and reasoning.
+	if custom {
+		o.ModelProvider = "command_fixture"
+		o.Model = "openai/gpt-5.6-sol"
+		o.ContextWindow = 32000
+	}
 	o.Message = "Reply exactly done. Do not call tools."
 	o.Wait = 10 * time.Second
 	created := Result{Outcome: "ok"}
@@ -139,6 +174,9 @@ stream_max_retries = 0
 	if created.Task == nil || created.Task.ProjectID == "" || created.Task.Name != o.Title {
 		client.Close()
 		t.Fatalf("project/title missing: %+v", created)
+	}
+	if custom && created.Task.ModelProvider != "command_fixture" {
+		t.Fatalf("provider missing: %+v", created.Task)
 	}
 	id := created.Task.ID
 	message := opts("message", id)
@@ -193,6 +231,9 @@ stream_max_retries = 0
 	}
 	if second.Outcome != "completed" || second.Task.Model != "openai/gpt-5.6-sol" || second.Task.ReasoningEffort == nil || *second.Task.ReasoningEffort != "high" {
 		t.Fatalf("cold settings/outcome: %+v", second)
+	}
+	if custom && second.Task.ModelProvider != "command_fixture" {
+		t.Fatalf("cold resume lost provider: %+v", second.Task)
 	}
 	mu.Lock()
 	captured := append([]string(nil), requests...)

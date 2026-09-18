@@ -9,6 +9,7 @@ ShellRoot {
   Launcher {
     id: app
     windowEnabled: false
+    catalogCLI: "/bin/false"
     cli: Quickshell.env("LAUNCHER_TEST_CLI")
     function openTask() { openedTasks++; dismiss() }
     function notifyDelivery(success, id) { notices++; lastSuccess=success }
