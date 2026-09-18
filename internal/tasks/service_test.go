@@ -28,6 +28,16 @@ func (f *fakeRPC) Call(_ context.Context, m string, p, out any) error {
 	b, _ := json.Marshal(v)
 	return json.Unmarshal(b, out)
 }
+
+func (f *fakeRPC) CommandExec(ctx context.Context, p map[string]any, out *commandResult, output func([]byte)) error {
+	if err := f.Call(ctx, "command/exec", p, out); err != nil {
+		return err
+	}
+	output([]byte(out.Stdout))
+	output([]byte(out.Stderr))
+	out.Stdout, out.Stderr = "", ""
+	return nil
+}
 func storedTask() Task {
 	t := Task{ID: uuid.NewString(), Name: "Preserve this title", Model: "configured-model"}
 	t.Status.Type = "notLoaded"

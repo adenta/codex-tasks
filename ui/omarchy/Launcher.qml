@@ -42,6 +42,26 @@ Item {
   readonly property bool catalogRefreshing: catalogProcess.running
   readonly property var inferenceModel: inferenceModels.find(function(m){return m.id===root.inference}) || null
   property string mode: settings.mode
+  property string environment: ""
+  property var environments: []
+  property var environmentMemory: ({})
+  property string environmentLoadedKey: ""
+  property string environmentError: ""
+  property bool environmentGit: true
+  readonly property bool environmentCandidate: mode==="worktree" && selectedProject!==null && selectedProject.isGitRepository!==false && !selectedProject.unavailable && !!(selectedProject.roots && selectedProject.roots.length)
+  readonly property string environmentKey: environmentCandidate ? JSON.stringify([host,selectedProject.roots[0].path]) : ""
+  readonly property bool usesNewWorktree: environmentCandidate && environmentGit
+  readonly property bool environmentsLoading: environmentKey!=="" && environmentLoadedKey!==environmentKey
+  readonly property var selectedEnvironment: environments.find(function(e){return e.id===root.environment}) || null
+  readonly property bool environmentReady: !environmentCandidate || (!environmentsLoading && !environmentError && (!environmentGit || environment==="" || (selectedEnvironment!==null && !selectedEnvironment.error)))
+  readonly property var environmentOptions: {
+    var list=[{value:"",label:"None"}]
+    if(environment==="@choose")list.unshift({value:"@choose",label:"Choose an environment…"})
+    environments.forEach(function(e){list.push({value:e.id,label:e.name+(e.error ? " (unavailable)" : "")})})
+    if(environment && environment!=="@choose" && !selectedEnvironment)list.push({value:environment,label:"Previously selected environment (unavailable)"})
+    return list
+  }
+  onEnvironmentKeyChanged: refreshEnvironments()
   property var targetScreen: null
   property string cli: Quickshell.env("HOME") + "/.local/bin/codex-tasks"
   readonly property var projects: {
@@ -57,7 +77,7 @@ Item {
   }
   readonly property var selectedProject: projects.find(function(p) { return p.id === root.projectId }) || null
   readonly property bool validServer: servers.some(function(s) { return s.value === root.host })
-  readonly property bool canSend: !busy && !pasting && !uncertain && validServer && (!inference || inferenceModel!==null) && (message.trim().length > 0 || images.length > 0) && (projectId === "" || (selectedProject !== null && !selectedProject.unavailable))
+  readonly property bool canSend: !busy && !pasting && !uncertain && environmentReady && validServer && (!inference || inferenceModel!==null) && (message.trim().length > 0 || images.length > 0) && (projectId === "" || (selectedProject !== null && !selectedProject.unavailable))
   readonly property var projectOptions: {
     var list = [{value:"", label:"No project"}]
     projects.forEach(function(p) { list.push({value:p.id,label:(p.name || p.id) + (p.unavailable ? " (unavailable)" : "")}) })
@@ -71,9 +91,11 @@ Item {
     property string mode: "worktree"
     property string cache: "{}"
     property string favorites: "[]"
+    property string environments: "{}"
   }
   Component.onCompleted: {
     try { cache=JSON.parse(settings.cache) } catch(e) {}
+    try { environmentMemory=JSON.parse(settings.environments) || {} } catch(e) {}
     try { var saved=JSON.parse(settings.favorites);if(Array.isArray(saved))favorites=saved.filter(function(v,i,a){return typeof v==="string"&&a.indexOf(v)===i}) } catch(e) {}
   }
   function remember() {
@@ -88,6 +110,7 @@ Item {
     if (!targetsProcess.running) targetsProcess.running=true
     refresh()
     refreshCatalog(false)
+    refreshEnvironments()
     Qt.callLater(function(){root.focusEditor()})
   }
   function close() {
@@ -129,6 +152,36 @@ Item {
   function changeHost(value) {
     host=value;projectId="";remember();status="";refresh()
   }
+  function chooseEnvironment(value) {
+    environment=value
+    if(value==="@choose" || !environmentKey)return
+    var memory=Object.assign({},environmentMemory);memory[environmentKey]=value;environmentMemory=memory
+    settings.environments=JSON.stringify(memory)
+  }
+  function refreshEnvironments() {
+    environmentLoadedKey="";environmentError="";environmentGit=true;environments=[];environment=""
+    if(!environmentKey || !environmentProcess || environmentProcess.running)return
+    environmentProcess.fetchKey=environmentKey
+    environmentProcess.command=[cli,"environments","--host",host,"--cwd",selectedProject.roots[0].path,"--json"]
+    environmentProcess.running=true
+  }
+  Process {
+    id:environmentProcess
+    property string fetchKey: ""
+    stdout:StdioCollector { id:environmentOutput }
+    onExited:function(code) {
+      if(fetchKey!==root.environmentKey){Qt.callLater(root.refreshEnvironments);return}
+      root.environmentLoadedKey=fetchKey
+      try {
+        var data=JSON.parse(environmentOutput.text)
+        if(code!==0 || data.error)throw new Error(data.error || "Environment discovery failed")
+        if(typeof data.environment_git!=="boolean")throw new Error("Environment discovery returned an invalid result")
+        root.environmentGit=data.environment_git;root.environments=data.environments || []
+        if(Object.prototype.hasOwnProperty.call(root.environmentMemory,fetchKey))root.environment=root.environmentMemory[fetchKey]
+        else root.environment=root.environments.length===1 ? root.environments[0].id : (root.environments.length>1 ? "@choose" : "")
+      }catch(e){root.environmentError=String(e)}
+    }
+  }
   function refresh() {
     if (busy || !host) return
     if(projectProcess.running) { projectProcess.pendingHost=host;return }
@@ -167,6 +220,7 @@ Item {
     if (!background) args.push("--wait-history")
     if(inferenceModel)args.push("--model-provider","openrouter","--model",inferenceModel.id,"--model-context-window",String(inferenceModel.context_length))
     if(inferenceModel && reasoningEffort)args.push("--reasoning-effort",reasoningEffort)
+    if(usesNewWorktree && environment)args.push("--environment",environment)
     if(projectId) {
       var p=selectedProject
       if(!p.roots || !p.roots.length) { status="Project has no working directory.";return }
@@ -176,7 +230,7 @@ Item {
       if(mode==="checkout")args.push("--checkout")
     } else args.push("--projectless")
     createProcess.background=!!background;recoveryPending=false
-    remember();busy=true;status="Creating task on " + host + "…";taskId=""
+    remember();busy=true;status=(usesNewWorktree && environment ? "Preparing environment and creating task on " : "Creating task on ") + host + "…";taskId=""
     createProcess.command=args;createProcess.prompt=message;createProcess.stdinEnabled=true;createProcess.running=true
     if (background) {
       opened=false
@@ -267,9 +321,12 @@ Item {
           } else root.openTask()
           return
         }
-        root.uncertain=!!root.taskId || data.outcome==="unknown" || !!data.input_accepted
+        root.uncertain=!!root.taskId || !!data.worktree || data.outcome==="unknown" || !!data.input_accepted
         root.status=data.error || "Creation could not be confirmed. Inspect tasks before sending again."
         if(root.taskId)root.status+=" Task: "+root.taskId
+        if(data.worktree)root.status+=" Worktree: "+data.worktree
+        if(data.setup_log_path)root.status+="\nSetup log on "+root.host+": "+data.setup_log_path
+        if(data.setup_output)root.status+="\n"+data.setup_output
       }catch(e){root.uncertain=true;root.status="Could not confirm delivery. Check tasks on " + root.host + " before sending again. " + String(createError.text || e)}
       if(background) { root.recoveryPending=true;root.notifyDelivery(false, root.taskId) }
     }

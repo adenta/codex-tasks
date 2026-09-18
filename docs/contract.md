@@ -17,6 +17,9 @@ turn status are observations, separate from the command's `outcome`.
 | `omitted_items` | Scanned non-message items omitted from this page |
 | `item_found` | Present for targeted reads; false means not found in this scan, not necessarily absent from remaining pages |
 | `projects` | `id`, `name`, all `roots`; `unavailable` and `reason` when none is accessible on the executing account |
+| `environments`, `environment_git` | Environment discovery: filename `id`, display `name`, optional validation `error`; whether the project is Git |
+| `setup_status`, `setup_exit_code`, `setup_output` | Selected environment setup: `completed`, `failed`, `timed_out`, or `unknown`; exit code when known and readable captured diagnostic tail up to 8 KiB |
+| `setup_log_path` | Private destination-host setup log under `CODEX_HOME/codex-tasks/setup-logs`; 1 MiB capture per stream, 2 MiB file plus metadata, seven-day retention cleaned at next setup |
 | `created`, `input_accepted` | Known side effects, retained if subsequent setup/observation fails |
 | `turn_id`, `turn_status`, `attention` | Turn observation and UI action needed |
 | `error_category`, `error` | Specific category and bounded explanation |
@@ -25,7 +28,7 @@ turn status are observations, separate from the command's `outcome`.
 
 Optional empty fields may be omitted. Task metadata uses upstream camelCase;
 codex-tasks result metadata uses snake_case. Clients should tolerate additional fields.
-Private remote requests require protocol 4 and an exact destination account;
+Private remote requests require protocol 6 and an exact destination account;
 the private read-only handshake returns `tasks_protocol`, `host`, `account`, and `build_id`. This is internal, not a new public capability
 command or desktop-control interface.
 Protocol versions must match exactly; mismatches fail before any upload or task
@@ -57,7 +60,7 @@ against the same limit and character bound; reasoning stays omitted.
 Failure categories include `route_unavailable`, `unsupported_operation`,
 `transport_unavailable`, `remote_incompatible`, `destination_mismatch`,
 `server_rejected`, `transport_uncertain`, `observation_unavailable`, and
-`operation_failed`, `invalid_image`, and `image_upload_failed`. SSH diagnostics retain at most 2048 bytes internally and
+`operation_failed`, `invalid_image`, `image_upload_failed`, and `environment_setup_failed`. SSH diagnostics retain at most 2048 bytes internally and
 expose only recognized transport reasons or a bounded process error. Arbitrary
 remote stderr is not returned. Exit 0 means the command returned successfully
 (including incomplete discovery); 1 means failed/partial operation; 2 means

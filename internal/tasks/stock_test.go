@@ -168,6 +168,23 @@ args = ["-c", "printf fake-command-key"]
 	s := service{rpc: client, client: client, home: home}
 	o := opts("create", "")
 	o.CWD = workspace
+	if remote {
+		// Exercise real remote creation with setup, while keeping scripts and
+		// inference entirely inside the disposable fixture.
+		for _, args := range [][]string{{"init", "-b", "main"}, {"-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--allow-empty", "-m", "initial"}, {"symbolic-ref", "refs/remotes/origin/HEAD", "refs/heads/main"}} {
+			if _, err := git(ctx, workspace, args...); err != nil {
+				t.Fatal(err)
+			}
+		}
+		envDir := filepath.Join(workspace, ".codex", "environments")
+		if err := os.MkdirAll(envDir, 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(envDir, "environment.toml"), []byte("version=1\n[setup]\nscript=\"printf ready > setup-ready; printf 'setup stdout\\\\n'; printf 'setup stderr\\\\n' >&2\"\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		o.Environment = "environment.toml"
+	}
 	o.Title = "Persisted lifecycle fixture"
 	o.Mode = "plan"
 	o.Model = "" // Use the effective configured model and reasoning.
@@ -184,6 +201,12 @@ args = ["-c", "printf fake-command-key"]
 	o.Images = []string{testPNG(t, root)}
 	o.WaitHistory = true
 	o.Wait = 10 * time.Second
+	if remote {
+		// The launcher waits for readable history, not turn completion. Observe
+		// completion afterward: new Git rollouts may not yet have metadata
+		// immediately after turn/start accepts input.
+		o.Wait = 0
+	}
 	created := Result{Outcome: "ok"}
 	create := func() error {
 		if !remote {
@@ -214,6 +237,20 @@ args = ["-c", "printf fake-command-key"]
 	}
 	if !created.HistoryReady {
 		t.Fatal("image-only user history was not readable")
+	}
+	if remote {
+		if created.SetupStatus != "completed" || created.Worktree == "" {
+			t.Fatalf("missing environment setup: %+v", created)
+		}
+		if b, err := os.ReadFile(filepath.Join(created.Worktree, "setup-ready")); err != nil || string(b) != "ready" {
+			t.Fatalf("setup did not prepare task worktree: %s %v", b, err)
+		}
+		if b, err := os.ReadFile(created.SetupLogPath); err != nil || !strings.Contains(string(b), "setup stdout\n") || !strings.Contains(string(b), "setup stderr\n") || !strings.Contains(string(b), "Setup completed (exit 0)") {
+			t.Fatalf("setup log missing streamed output: %q %v", b, err)
+		}
+		if err := s.progress(ctx, Options{Wait: 10 * time.Second, TurnID: created.TurnID}, &created); err != nil {
+			t.Fatal(err)
+		}
 	}
 	// Completed ingestion must persist the image across cold resume even when
 	// the original local file no longer exists.

@@ -43,37 +43,44 @@ type Item struct {
 	ContinuationCursor string `json:"continuation_cursor,omitempty"`
 }
 type Result struct {
-	Workspace      string     `json:"workspace,omitempty"`
-	Coverage       []Coverage `json:"coverage,omitempty"`
-	SearchComplete *bool      `json:"search_complete,omitempty"`
-	OmittedItems   int        `json:"omitted_items,omitempty"`
-	ItemFound      *bool      `json:"item_found,omitempty"`
-	Created        bool       `json:"created,omitempty"`
-	OperationID    string     `json:"operation_id"`
-	Host           string     `json:"host"`
-	Account        string     `json:"account"`
-	Action         string     `json:"action"`
-	Outcome        string     `json:"outcome"`
-	HistoryReady   bool       `json:"history_ready,omitempty"`
-	InputAccepted  bool       `json:"input_accepted,omitempty"`
-	ErrorCategory  string     `json:"error_category,omitempty"`
-	Error          string     `json:"error,omitempty"`
-	ActivityStatus string     `json:"activity_status,omitempty"`
-	Task           *Task      `json:"task,omitempty"`
-	Tasks          []Task     `json:"tasks,omitempty"`
-	Projects       []Project  `json:"projects,omitempty"`
-	Items          []Item     `json:"items,omitempty"`
-	NextCursor     string     `json:"next_cursor,omitempty"`
-	TurnID         string     `json:"turn_id,omitempty"`
-	TurnStatus     string     `json:"turn_status,omitempty"`
-	Attention      string     `json:"attention,omitempty"`
-	Worktree       string     `json:"worktree,omitempty"`
-	ProjectID      string     `json:"project_id,omitempty"`
-	Mode           string     `json:"mode,omitempty"`
+	Environments   []Environment `json:"environments,omitempty"`
+	EnvironmentGit *bool         `json:"environment_git,omitempty"`
+	SetupStatus    string        `json:"setup_status,omitempty"`
+	SetupOutput    string        `json:"setup_output,omitempty"`
+	SetupExitCode  *int          `json:"setup_exit_code,omitempty"`
+	SetupLogPath   string        `json:"setup_log_path,omitempty"`
+	Workspace      string        `json:"workspace,omitempty"`
+	Coverage       []Coverage    `json:"coverage,omitempty"`
+	SearchComplete *bool         `json:"search_complete,omitempty"`
+	OmittedItems   int           `json:"omitted_items,omitempty"`
+	ItemFound      *bool         `json:"item_found,omitempty"`
+	Created        bool          `json:"created,omitempty"`
+	OperationID    string        `json:"operation_id"`
+	Host           string        `json:"host"`
+	Account        string        `json:"account"`
+	Action         string        `json:"action"`
+	Outcome        string        `json:"outcome"`
+	HistoryReady   bool          `json:"history_ready,omitempty"`
+	InputAccepted  bool          `json:"input_accepted,omitempty"`
+	ErrorCategory  string        `json:"error_category,omitempty"`
+	Error          string        `json:"error,omitempty"`
+	ActivityStatus string        `json:"activity_status,omitempty"`
+	Task           *Task         `json:"task,omitempty"`
+	Tasks          []Task        `json:"tasks,omitempty"`
+	Projects       []Project     `json:"projects,omitempty"`
+	Items          []Item        `json:"items,omitempty"`
+	NextCursor     string        `json:"next_cursor,omitempty"`
+	TurnID         string        `json:"turn_id,omitempty"`
+	TurnStatus     string        `json:"turn_status,omitempty"`
+	Attention      string        `json:"attention,omitempty"`
+	Worktree       string        `json:"worktree,omitempty"`
+	ProjectID      string        `json:"project_id,omitempty"`
+	Mode           string        `json:"mode,omitempty"`
 }
 
 type rpc interface {
 	Call(context.Context, string, any, any) error
+	CommandExec(context.Context, map[string]any, *commandResult, func([]byte)) error
 }
 type service struct {
 	rpc       rpc

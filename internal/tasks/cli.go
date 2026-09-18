@@ -23,12 +23,13 @@ const maxMessage = 1 << 20
 const remoteLimit = 8 << 20 // accounts for JSON escaping of a 1 MiB prompt
 const help = `Usage: codex-tasks OPERATION [TASK] [OPTIONS]
   models [--json] [--refresh]
+  environments --cwd DIRECTORY
   find --query TEXT [--archive all|active|archived] [--limit N] [--cursor CURSOR]
   projects | list [--project ID] [--archived] [--limit N] [--cursor CURSOR]
   read TASK [--turn ID] [--limit N] [--cursor CURSOR]
        [--item ID --offset N] [--max-chars N] [--include-outputs]
   create --cwd DIRECTORY [--project ID | --projectless] [--checkout | --ref REF]
-         [--title TITLE] [--model MODEL] [--model-provider PROVIDER] [--mode plan|default] [--message-file FILE|-] [--image FILE ...]
+         [--environment FILE.toml] [--title TITLE] [--model MODEL] [--model-provider PROVIDER] [--mode plan|default] [--message-file FILE|-] [--image FILE ...]
   fork TASK [--title TITLE] [--mode plan|default]
   message TASK [--message-file FILE|-] [--image FILE ...] [--wait DURATION]
   progress TASK [--turn ID] [--wait DURATION]
@@ -45,6 +46,7 @@ Native desktop task tools remain necessary for desktop-only targets and handoff.
 
 type Options struct {
 	ReasoningEffort string        `json:"reasoning_effort,omitempty"`
+	Environment     string        `json:"environment,omitempty"`
 	WaitHistory     bool          `json:"wait_history,omitempty"`
 	Target          string        `json:"target,omitempty"`
 	Query           string        `json:"query,omitempty"`
@@ -109,6 +111,7 @@ func parse(args []string, stdin io.Reader) (Options, error) {
 	fs.BoolVar(&o.JSON, "json", false, "JSON output")
 	fs.StringVar(&o.SourceTaskID, "source-task", os.Getenv("CODEX_THREAD_ID"), "source task UUID")
 	fs.StringVar(&o.CWD, "cwd", "", "workspace directory")
+	fs.StringVar(&o.Environment, "environment", "", "environment filename for new worktree setup")
 	fs.StringVar(&o.Project, "project", "", "project ID")
 	fs.StringVar(&o.Title, "title", "", "task title")
 	fs.StringVar(&o.Model, "model", "", "model override for new task")
@@ -155,8 +158,9 @@ func parse(args []string, stdin io.Reader) (Options, error) {
 		o.TaskID = fs.Arg(0)
 	}
 	allowed := map[string]string{
-		"find": "query archive limit cursor", "projects": "limit cursor", "list": "project archived limit cursor", "read": "turn limit cursor item offset max-chars include-outputs",
-		"create": "cwd project projectless checkout ref title model model-provider model-context-window reasoning-effort mode message-file image wait wait-history", "fork": "title mode",
+		"environments": "cwd",
+		"find":         "query archive limit cursor", "projects": "limit cursor", "list": "project archived limit cursor", "read": "turn limit cursor item offset max-chars include-outputs",
+		"create": "cwd project projectless checkout ref environment title model model-provider model-context-window reasoning-effort mode message-file image wait wait-history", "fork": "title mode",
 		"message": "message-file image wait", "progress": "turn wait", "mode": "mode", "archive": "", "unarchive": "",
 		"activity": "since task action outcome limit follow",
 	}
@@ -213,6 +217,12 @@ func parse(args []string, stdin io.Reader) (Options, error) {
 }
 
 func validate(o Options) error {
+	if o.Environment != "" && (o.Action != "create" || o.Checkout || !filepath.IsAbs(o.CWD) || !validEnvironmentID(o.Environment)) {
+		return fmt.Errorf("--environment requires create with an absolute --cwd, a .toml filename, and a new Git worktree")
+	}
+	if o.Action == "environments" && !filepath.IsAbs(o.CWD) {
+		return fmt.Errorf("environments requires --cwd with an absolute directory")
+	}
 	if len(o.Images) > maxImages || (len(o.Images) > 0 && o.Action != "create" && o.Action != "message") {
 		return fmt.Errorf("--image is supported by create/message only, up to 8 images")
 	}
@@ -289,7 +299,7 @@ func validate(o Options) error {
 		}
 	}
 	switch o.Action {
-	case "find", "projects", "list", "create", "activity":
+	case "find", "projects", "list", "create", "activity", "environments":
 		if o.TaskID != "" {
 			return fmt.Errorf("%s does not accept a positional task ID", o.Action)
 		}
@@ -416,11 +426,7 @@ func run(ctx context.Context, paths endpoints.Config, o Options, stdout, stderr 
 	// The event's started means command invocation, not target turn execution.
 	e.Outcome = "invoked"
 	logErr := log.append(e)
-	timeout := 30*time.Second + o.Wait
-	if len(o.Images) > 0 {
-		timeout += 2 * time.Minute
-	}
-	opCtx, cancel := context.WithTimeout(ctx, timeout)
+	opCtx, cancel := context.WithTimeout(ctx, operationTimeout(o))
 	defer cancel()
 	var actionErr error
 	if o.Action == "find" {
@@ -478,6 +484,9 @@ func setError(r *Result, err error) {
 
 func executeLocal(ctx context.Context, p endpoints.Config, o Options, r *Result) error {
 	r.Host, r.Account = string(p.Host), p.Account
+	if o.Action == "environments" {
+		return listEnvironments(ctx, o.CWD, r)
+	}
 	if o.Action == "find" {
 		return (&service{home: p.CodexHome}).find(ctx, o, r)
 	}
@@ -563,7 +572,7 @@ func dispatch(ctx context.Context, alias string, o Options, r *Result) error {
 		return nil
 	}
 	r.Outcome, r.ErrorCategory = "unknown", "transport_uncertain"
-	if o.Action == "find" || o.Action == "list" || o.Action == "read" || o.Action == "projects" || o.Action == "progress" {
+	if o.Action == "find" || o.Action == "list" || o.Action == "read" || o.Action == "projects" || o.Action == "progress" || o.Action == "environments" {
 		r.Outcome, r.ErrorCategory = "failed", "transport_unavailable"
 		return fmt.Errorf("remote read failed: %s", diagnostic.message(err))
 	}
@@ -609,7 +618,7 @@ func runRemote(ctx context.Context, p endpoints.Config, args []string, stdin io.
 		_ = json.NewEncoder(stdout).Encode(r)
 		return 0
 	}
-	opCtx, cancel := context.WithTimeout(ctx, 30*time.Second+o.Wait)
+	opCtx, cancel := context.WithTimeout(ctx, operationTimeout(o))
 	defer cancel()
 	setError(&r, executeLocal(opCtx, p, o, &r))
 	_ = json.NewEncoder(stdout).Encode(r)

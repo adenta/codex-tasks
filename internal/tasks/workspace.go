@@ -128,7 +128,7 @@ func (s *service) workspace(ctx context.Context, o Options) (string, bool, error
 	if err != nil || !info.IsDir() {
 		return "", false, fmt.Errorf("workspace must be an existing directory")
 	}
-	_, err = git(ctx, o.CWD, "rev-parse", "--show-toplevel")
+	sourceRoot, err := git(ctx, o.CWD, "rev-parse", "--show-toplevel")
 	if err != nil {
 		// Only a confirmed non-repository takes the plain directory path.
 		if _, lookupErr := exec.LookPath("git"); lookupErr != nil {
@@ -164,6 +164,9 @@ func (s *service) workspace(ctx context.Context, o Options) (string, bool, error
 		_ = os.Remove(root)
 		return "", false, err
 	}
+	if err := copyLocalOverride(ctx, sourceRoot, path); err != nil {
+		return path, true, fmt.Errorf("prepare override in retained worktree %s: %w", path, err)
+	}
 	return path, true, nil
 }
 
@@ -173,6 +176,20 @@ func (s *service) create(ctx context.Context, o Options, r *Result) error {
 		return err
 	}
 	o.Model = model
+	var environment *environmentConfig
+	if o.Environment != "" {
+		isGit, err := environmentRepository(ctx, o.CWD)
+		if err != nil {
+			return err
+		}
+		if !isGit || o.Checkout {
+			return fmt.Errorf("environment setup requires a new Git worktree")
+		}
+		environment, err = readEnvironment(o.CWD, o.Environment)
+		if err != nil {
+			return err
+		}
+	}
 	generated := ""
 	if o.Projectless && o.CWD == "" {
 		var err error
@@ -191,11 +208,16 @@ func (s *service) create(ctx context.Context, o Options, r *Result) error {
 	}
 	r.ProjectID = project
 	workspace, owned, err := s.workspace(ctx, o)
+	if owned {
+		r.Worktree = workspace
+	}
 	if err != nil {
 		return err
 	}
-	if owned {
-		r.Worktree = workspace
+	if environment != nil {
+		if err := s.runEnvironmentSetup(ctx, workspace, environment, r); err != nil {
+			return err
+		}
 	}
 	params := map[string]any{"cwd": workspace, "ephemeral": false, "historyMode": "paginated", "threadSource": "agent_created_thread"}
 	if generated != "" {
@@ -230,7 +252,7 @@ func (s *service) create(ctx context.Context, o Options, r *Result) error {
 	err = s.call(ctx, "thread/start", params, &reply, true)
 	if err != nil {
 		var rejected *RPCError
-		if owned && errors.As(err, &rejected) {
+		if owned && environment == nil && errors.As(err, &rejected) {
 			// Remove only our own clean, unattached worktree after a definite
 			// rejection. On uncertainty preserve it for inspection.
 			if _, cleanup := git(ctx, o.CWD, "worktree", "remove", "--", workspace); cleanup == nil {

@@ -55,12 +55,6 @@ import qs.Ui
           }
         }
         InferenceRow { width:parent.width;root:panel.root }
-        Dropdown {
-          width:parent.width;visible:root.selectedProject!==null && root.selectedProject.isGitRepository!==false
-          label:"Run in";value:root.mode;options:[{value:"worktree",label:"New worktree"},{value:"checkout",label:"Existing checkout"}]
-          enabled:!root.busy && !root.uncertain
-          onChanged:function(value){root.mode=value;root.remember()}
-        }
         Rectangle {
           width:parent.width;height:Style.space(190);color:Color.menu.background;radius:Style.cornerRadius
           border.color:editor.activeFocus ? Color.accent : Color.popups.border
@@ -84,10 +78,45 @@ import qs.Ui
             }
           }
         }
-        Button {
-          text:"Attach image…";bordered:true;focusable:true
-          enabled:!root.busy && !root.uncertain && !root.pasting && root.images.length<8
-          onClicked:imagePicker.open()
+        Row {
+          id:workspaceControls
+          width:parent.width;spacing:Style.space(12)
+          readonly property real pickerWidth: Math.max(0,Math.min(Style.space(190),(width-attachButton.implicitWidth-2*spacing)/2))
+          Dropdown {
+            width:workspaceControls.pickerWidth
+            visible:root.selectedProject!==null && root.selectedProject.isGitRepository!==false
+            label:"Run in";value:root.mode;options:[{value:"worktree",label:"New worktree"},{value:"checkout",label:"Existing checkout"}]
+            enabled:!root.busy && !root.uncertain
+            onChanged:function(value){root.mode=value;root.remember()}
+          }
+          Dropdown {
+            width:workspaceControls.pickerWidth;visible:root.usesNewWorktree
+            label:root.environmentsLoading ? "Environment · loading…" : "Environment"
+            value:root.environment;options:root.environmentOptions
+            enabled:!root.busy && !root.uncertain && !root.environmentsLoading && !root.environmentError
+            onChanged:function(value){root.chooseEnvironment(value)}
+          }
+          Button {
+            id:attachButton
+            anchors.bottom:parent.bottom;height:Style.spacing.controlHeight
+            text:"Attach image…";bordered:true;focusable:true
+            enabled:!root.busy && !root.uncertain && !root.pasting && root.images.length<8
+            onClicked:imagePicker.open()
+          }
+        }
+        Column {
+          width:parent.width;spacing:Style.space(6)
+          visible:root.usesNewWorktree && (!!root.environmentError || !!(root.selectedEnvironment && root.selectedEnvironment.error))
+          Text {
+            width:parent.width;visible:text!==""
+            text:root.environmentError || (root.selectedEnvironment ? root.selectedEnvironment.error || "" : "")
+            color:Color.popups.text;font.family:Style.font.family;font.pixelSize:Style.space(12);wrapMode:Text.Wrap
+          }
+          Button {
+            text:"Retry environment discovery";visible:root.environmentError!==""
+            enabled:!root.busy && !root.uncertain && !root.environmentsLoading
+            onClicked:root.refreshEnvironments()
+          }
         }
         Flow {
           width:parent.width;spacing:Style.space(8);visible:root.images.length>0
@@ -106,7 +135,13 @@ import qs.Ui
         Row {
           width:parent.width;spacing:Style.space(10);visible:root.status!==""
           QQC.BusyIndicator { width:Style.space(24);height:width;running:root.busy;visible:running }
-          Text { width:parent.width-(root.busy ? Style.space(34):0);text:root.status;color:Color.popups.text;font.family:Style.font.family;font.pixelSize:Style.space(13);wrapMode:Text.Wrap }
+          QQC.ScrollView {
+            id:statusScroll
+            width:parent.width-(root.busy ? Style.space(34):0)
+            height:Math.min(statusText.implicitHeight,Style.space(120));clip:true
+            contentWidth:availableWidth
+            Text { id:statusText;width:statusScroll.availableWidth;text:root.status;textFormat:Text.PlainText;color:Color.popups.text;font.family:Style.font.family;font.pixelSize:Style.space(13);wrapMode:Text.Wrap }
+          }
         }
         Text { width:parent.width;text:"Enter to send & open · Alt+Enter to send in background\nShift+Enter for a new line · Ctrl+V to paste text or images";color:Qt.alpha(Color.popups.text,0.6);font.family:Style.font.family;font.pixelSize:Style.space(12);wrapMode:Text.Wrap }
         Flow {

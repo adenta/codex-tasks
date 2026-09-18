@@ -76,6 +76,8 @@ codex-tasks find --query 'review permissions'
 codex-tasks projects --target server/agent
 codex-tasks read TASK_UUID --host server --limit 20
 codex-tasks create --host server --cwd /absolute/repo --mode plan --message-file brief.txt
+codex-tasks environments --host server --cwd /absolute/repo --json
+codex-tasks create --host server --cwd /absolute/repo --environment environment.toml --message-file brief.txt
 codex-tasks message TASK_UUID --host server --message-file follow-up.txt
 codex-tasks progress TASK_UUID --host server --wait 30s
 codex-tasks fork TASK_UUID --host server --title 'Follow-up review'
@@ -116,6 +118,11 @@ of an uncertain task must precede any retry. CLI history text omits image conten
 - Follow discovery and history cursors. An incomplete search is not proof of absence.
 - Git task creation defaults to an isolated detached worktree from local
   `origin/HEAD`; use `--ref` for a selected ref or `--checkout` to use the checkout.
+  Before starting the task, creation copies an ignored root `AGENTS.override.md`
+  from the source checkout into the new worktree. Missing files and source
+  symlinks are skipped; existing destination files are never overwritten. Copy
+  failures stop creation and report the retained worktree for inspection. Other
+  ignored files and local environment setup scripts are not processed.
   Forks inherit the source checkout; they do not copy uncommitted files.
 - `accepted` is input acceptance; `completed` is turn completion. Neither proves
   that the user's overall task is finished. Approvals and input requests stay in
@@ -151,7 +158,7 @@ See [migration and validation notes](docs/migration.md). Extracted from
 The modal offers model-specific reasoning levels in **Effort**, beside Inference.
 Each fresh draft starts at Default (no override). Direct shell callers can use
 `create --reasoning-effort VALUE`; creation verifies the returned setting before
-sending input. Local and remote CLI copies must both support protocol 4.
+sending input. Local and remote CLI copies must both support protocol 6.
 
 New tasks explicitly using `--model-provider openrouter` keep the selected model
 and automatically use the shared OpenRouter preset, for example

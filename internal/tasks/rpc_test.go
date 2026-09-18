@@ -2,17 +2,67 @@ package tasks
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/coder/websocket"
 	"github.com/google/uuid"
 )
+
+func TestRPCCommandExecStreamsOutputAndExit(t *testing.T) {
+	socket := testSocket(t, func(c *websocket.Conn, ctx context.Context) {
+		for {
+			_, b, err := c.Read(ctx)
+			if err != nil {
+				return
+			}
+			var req struct {
+				ID     int            `json:"id"`
+				Method string         `json:"method"`
+				Params map[string]any `json:"params"`
+			}
+			if err := json.Unmarshal(b, &req); err != nil {
+				t.Error(err)
+				return
+			}
+			if req.Method == "initialized" {
+				continue
+			}
+			if req.Method == "initialize" {
+				writeRPC(t, c, ctx, map[string]any{"id": req.ID, "result": map[string]any{}})
+				continue
+			}
+			if req.Method != "command/exec" {
+				t.Error("unexpected method", req.Method)
+				return
+			}
+			for _, chunk := range []struct{ id, stream, text string }{{"other", "stdout", "ignore"}, {"setup", "stdout", "one\ntwo\n"}, {"setup", "stderr", "error\n"}} {
+				writeRPC(t, c, ctx, map[string]any{"method": "command/exec/outputDelta", "params": map[string]any{"processId": chunk.id, "stream": chunk.stream, "deltaBase64": base64.StdEncoding.EncodeToString([]byte(chunk.text))}})
+			}
+			writeRPC(t, c, ctx, map[string]any{"id": req.ID, "result": map[string]any{"exitCode": 17, "stdout": "", "stderr": ""}})
+		}
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	c, err := Dial(ctx, socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	var output strings.Builder
+	var reply commandResult
+	err = c.CommandExec(ctx, map[string]any{"processId": "setup", "streamStdoutStderr": true, "command": []string{"fixture"}}, &reply, func(b []byte) { output.Write(b) })
+	if err != nil || reply.ExitCode == nil || *reply.ExitCode != 17 || output.String() != "one\ntwo\nerror\n" {
+		t.Fatalf("%+v %q %v", reply, output.String(), err)
+	}
+}
 
 func testSocket(t *testing.T, handler func(*websocket.Conn, context.Context)) string {
 	t.Helper()
