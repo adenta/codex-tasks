@@ -4,7 +4,7 @@ import Quickshell
 import "Launcher"
 ShellRoot {
  Settings { id:writer;location:"file://"+Quickshell.env("CODEX_TASKS_LAUNCHER_SETTINGS") }
- Launcher { id: app; windowEnabled:false;cli:"/bin/false";catalogCLI:"/bin/false" }
+ Launcher { id: app; windowEnabled:false;cli:"/bin/false" }
  Timer { interval: 500; running:true; onTriggered: {
    app.servers=[{value:"grace",label:"grace"}];app.host="grace";app.projectId="";app.message="Test";
    if(!app.canSend)throw new Error("valid prompt cannot send")
