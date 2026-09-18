@@ -17,6 +17,7 @@ type Task struct {
 	Name                 string  `json:"name"`
 	CWD                  string  `json:"cwd"`
 	ProjectID            string  `json:"projectId"`
+	ModelProvider        string  `json:"modelProvider,omitempty"`
 	Model                string  `json:"model"`
 	ReasoningEffort      *string `json:"reasoningEffort"`
 	CanAcceptDirectInput *bool   `json:"canAcceptDirectInput"`
@@ -100,9 +101,10 @@ func (s *service) thread(ctx context.Context, id string) (Task, error) {
 }
 func (s *service) resume(ctx context.Context, t Task) (Task, error) {
 	var reply struct {
-		Thread Task    `json:"thread"`
-		Model  string  `json:"model"`
-		Effort *string `json:"reasoningEffort"`
+		Thread   Task    `json:"thread"`
+		Model    string  `json:"model"`
+		Provider string  `json:"modelProvider"`
+		Effort   *string `json:"reasoningEffort"`
 	}
 	err := s.call(ctx, "thread/resume", map[string]any{"threadId": t.ID, "excludeTurns": true}, &reply, true)
 	if err != nil {
@@ -112,6 +114,9 @@ func (s *service) resume(ctx context.Context, t Task) (Task, error) {
 		return t, fmt.Errorf("app-server resumed an unexpected task")
 	}
 	t = reply.Thread
+	if reply.Provider != "" {
+		t.ModelProvider = reply.Provider
+	}
 	if t.Model == "" {
 		t.Model = reply.Model
 	}

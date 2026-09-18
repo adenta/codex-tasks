@@ -88,10 +88,11 @@ func checkRemoteTasks(ctx context.Context, alias, host, account string, r *Resul
 	cmd.Stdout, cmd.Stderr = &output, &diagnostic
 	err := cmd.Run()
 	var cap struct {
-		Protocol int    `json:"tasks_protocol"`
-		Launcher bool   `json:"remote_launcher"`
-		Host     string `json:"host"`
-		Account  string `json:"account"`
+		Protocol      int    `json:"tasks_protocol"`
+		Launcher      bool   `json:"remote_launcher"`
+		ModelProvider bool   `json:"model_provider"`
+		Host          string `json:"host"`
+		Account       string `json:"account"`
 	}
 	if err != nil {
 		r.ErrorCategory = "transport_unavailable"
@@ -108,6 +109,10 @@ func checkRemoteTasks(ctx context.Context, alias, host, account string, r *Resul
 	if len(launcher) > 0 && launcher[0] && !cap.Launcher {
 		r.ErrorCategory = "remote_incompatible"
 		return fmt.Errorf("update codex-tasks on %s for remote launcher support; no task was created", host)
+	}
+	if len(launcher) > 1 && launcher[1] && !cap.ModelProvider {
+		r.ErrorCategory = "remote_incompatible"
+		return fmt.Errorf("update codex-tasks on %s for provider selection; no task was created", host)
 	}
 	if cap.Host != host || cap.Account != account {
 		r.ErrorCategory = "destination_mismatch"

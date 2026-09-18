@@ -53,3 +53,24 @@ The picker also reads the desktop's saved remote folder inventory through
 as paths, never desktop project IDs. The server resolves or creates its own
 project assignment. Git mode choices on an unclassified folder apply if it is
 Git; non-Git folders run directly. Desktop state is never modified.
+
+## Inference
+
+The Inference selector shares the Server/Project row. Each fresh composer starts
+with Subscription (no model/provider override). The dropdown pins Subscription,
+then favorites, then remaining models alphabetically. Search matches name or ID;
+star buttons save local favorites independently of the model catalog. Missing
+favorites stay visible but disabled. Space toggles a favorite when navigating
+results with the arrow keys.
+
+Install the standalone `codex-openrouter` catalog helper from codex-ops at
+`~/.local/bin/codex-openrouter` on the desktop. It reads the public OpenRouter
+catalog and keeps an atomic cache. Opening uses that cache; the refresh button
+explicitly updates it. Failure preserves cached models and subscription access.
+The helper does not handle credentials or route inference.
+
+The destination account must already have a configured `openrouter` provider.
+Selecting a model passes its ID, provider, and advertised context size through
+`codex-tasks create`. Both local and remote CLI must support provider selection;
+older helpers are rejected before creation. No automatic provider fallback or
+resubmission occurs. Ordinary subscription tasks and Credits are unchanged.
