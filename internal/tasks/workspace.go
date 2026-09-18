@@ -128,7 +128,7 @@ func (s *service) workspace(ctx context.Context, o Options) (string, bool, error
 	if err != nil || !info.IsDir() {
 		return "", false, fmt.Errorf("workspace must be an existing directory")
 	}
-	_, err = git(ctx, o.CWD, "rev-parse", "--show-toplevel")
+	sourceRoot, err := git(ctx, o.CWD, "rev-parse", "--show-toplevel")
 	if err != nil {
 		// Only a confirmed non-repository takes the plain directory path.
 		if _, lookupErr := exec.LookPath("git"); lookupErr != nil {
@@ -164,6 +164,9 @@ func (s *service) workspace(ctx context.Context, o Options) (string, bool, error
 		_ = os.Remove(root)
 		return "", false, err
 	}
+	if err := copyLocalOverride(ctx, sourceRoot, path); err != nil {
+		return path, true, fmt.Errorf("prepare override in retained worktree %s: %w", path, err)
+	}
 	return path, true, nil
 }
 
@@ -191,11 +194,11 @@ func (s *service) create(ctx context.Context, o Options, r *Result) error {
 	}
 	r.ProjectID = project
 	workspace, owned, err := s.workspace(ctx, o)
-	if err != nil {
-		return err
-	}
 	if owned {
 		r.Worktree = workspace
+	}
+	if err != nil {
+		return err
 	}
 	params := map[string]any{"cwd": workspace, "ephemeral": false, "historyMode": "paginated", "threadSource": "agent_created_thread"}
 	if generated != "" {

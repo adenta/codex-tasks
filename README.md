@@ -116,6 +116,11 @@ of an uncertain task must precede any retry. CLI history text omits image conten
 - Follow discovery and history cursors. An incomplete search is not proof of absence.
 - Git task creation defaults to an isolated detached worktree from local
   `origin/HEAD`; use `--ref` for a selected ref or `--checkout` to use the checkout.
+  Before starting the task, creation copies an ignored root `AGENTS.override.md`
+  from the source checkout into the new worktree. Missing files and source
+  symlinks are skipped; existing destination files are never overwritten. Copy
+  failures stop creation and report the retained worktree for inspection. Other
+  ignored files and local environment setup scripts are not processed.
   Forks inherit the source checkout; they do not copy uncommitted files.
 - `accepted` is input acceptance; `completed` is turn completion. Neither proves
   that the user's overall task is finished. Approvals and input requests stay in
