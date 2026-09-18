@@ -9,7 +9,6 @@ ShellRoot {
   Launcher {
     id: app
     windowEnabled: false
-    catalogCLI: "/bin/false"
     cli: Quickshell.env("LAUNCHER_TEST_CLI")
     function openTask() { openedTasks++; dismiss() }
     function notifyDelivery(success, id) { notices++; lastSuccess=success }
@@ -18,7 +17,7 @@ ShellRoot {
   Timer {
     interval: 100; repeat: true; running: true
     onTriggered: {
-      if (app.busy) return
+      if (app.busy || app.catalogRefreshing) return
       switch(stage++) {
       case 0:
         app.servers=[{value:"grace",label:"grace"}];app.host="grace";app.projectId=""
@@ -31,6 +30,8 @@ ShellRoot {
         check(!app.opened && app.busy, "pending background cannot be hidden")
         break
       case 1:
+        check(app.inferenceModels.length===1 && app.inferenceModels[0].id==="test/model", "catalog did not use task CLI")
+        app.inference="test/model"
         check(app.servers.some(function(s){return s.value==="workstation" && s.label==="local"}), "local target missing")
         app.changeHost("workstation")
         check(openedTasks===0 && notices===1 && lastSuccess, "background opened Codex or did not notify")

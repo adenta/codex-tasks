@@ -123,6 +123,11 @@ See [migration and validation notes](docs/migration.md). Extracted from
 
 ## Optional Omarchy popup
 
+The public OpenRouter catalog is built into `codex-tasks models --json`.
+Use `--refresh` to update it explicitly; otherwise a valid local cache is reused.
+Catalog access requires no endpoint configuration, credentials, or Ops helper.
+See `codex-tasks help models` for cache location and failure behavior.
+
 See [ui/omarchy](ui/omarchy/README.md) for a themed remote task composer and an
 Alt+Space binding. The CLI remains independent of Quickshell and Omarchy.
 `targets` prints the local account and configured remote destinations as JSON
