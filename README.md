@@ -76,6 +76,8 @@ codex-tasks find --query 'review permissions'
 codex-tasks projects --target server/agent
 codex-tasks read TASK_UUID --host server --limit 20
 codex-tasks create --host server --cwd /absolute/repo --mode plan --message-file brief.txt
+codex-tasks environments --host server --cwd /absolute/repo --json
+codex-tasks create --host server --cwd /absolute/repo --environment environment.toml --message-file brief.txt
 codex-tasks message TASK_UUID --host server --message-file follow-up.txt
 codex-tasks progress TASK_UUID --host server --wait 30s
 codex-tasks fork TASK_UUID --host server --title 'Follow-up review'

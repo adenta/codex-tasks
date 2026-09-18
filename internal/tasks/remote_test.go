@@ -29,7 +29,7 @@ func TestRemoteHelperProcess(t *testing.T) {
 
 func TestRemoteUsesStdinRecordsOnceAndPreservesSemanticFailure(t *testing.T) {
 	dir := t.TempDir()
-	script := "#!/bin/sh\nfor arg do last_arg=$arg; done\nif [ \"$last_arg\" = _capabilities ]; then printf '%s\\n' '{\"tasks_protocol\":3,\"host\":\"love\",\"account\":\"agent\"}'; exit 0; fi\nexec '" + strings.ReplaceAll(os.Args[0], "'", "'\\''") + "' -test.run=^TestRemoteHelperProcess$\n"
+	script := "#!/bin/sh\nfor arg do last_arg=$arg; done\nif [ \"$last_arg\" = _capabilities ]; then printf '%s\\n' '{\"tasks_protocol\":5,\"host\":\"love\",\"account\":\"agent\"}'; exit 0; fi\nexec '" + strings.ReplaceAll(os.Args[0], "'", "'\\''") + "' -test.run=^TestRemoteHelperProcess$\n"
 	if err := os.WriteFile(filepath.Join(dir, "ssh"), []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestRemoteUsesStdinRecordsOnceAndPreservesSemanticFailure(t *testing.T) {
 func TestRemoteUncertainWriteIsNotRetried(t *testing.T) {
 	dir := t.TempDir()
 	marker := filepath.Join(dir, "calls")
-	script := "#!/bin/sh\nfor arg do last_arg=$arg; done\nif [ \"$last_arg\" = _capabilities ]; then printf '%s\\n' '{\"tasks_protocol\":3,\"host\":\"love\",\"account\":\"agent\"}'; exit 0; fi\nprintf x >> '" + marker + "'\nexit 255\n"
+	script := "#!/bin/sh\nfor arg do last_arg=$arg; done\nif [ \"$last_arg\" = _capabilities ]; then printf '%s\\n' '{\"tasks_protocol\":5,\"host\":\"love\",\"account\":\"agent\"}'; exit 0; fi\nprintf x >> '" + marker + "'\nexit 255\n"
 	if err := os.WriteFile(filepath.Join(dir, "ssh"), []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +108,7 @@ func TestRemotePreflightRejectsOldHostWithoutSending(t *testing.T) {
 
 func TestRemoteCompatibleHostReceivesExactMessageOnce(t *testing.T) {
 	dir := t.TempDir()
-	script := "#!/bin/sh\nfor arg do last_arg=$arg; done\nif [ \"$last_arg\" = _capabilities ]; then printf '%s\\n' '{\"tasks_protocol\":3,\"host\":\"love\",\"account\":\"agent\"}'; exit 0; fi\nexec '" + strings.ReplaceAll(os.Args[0], "'", "'\\''") + "' -test.run=^TestRemoteHelperProcess$\n"
+	script := "#!/bin/sh\nfor arg do last_arg=$arg; done\nif [ \"$last_arg\" = _capabilities ]; then printf '%s\\n' '{\"tasks_protocol\":5,\"host\":\"love\",\"account\":\"agent\"}'; exit 0; fi\nexec '" + strings.ReplaceAll(os.Args[0], "'", "'\\''") + "' -test.run=^TestRemoteHelperProcess$\n"
 	if err := os.WriteFile(filepath.Join(dir, "ssh"), []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +126,7 @@ func TestRemoteCompatibleHostReceivesExactMessageOnce(t *testing.T) {
 }
 
 func TestRemoteProtocolMismatchStopsBeforeDispatch(t *testing.T) {
-	for _, protocol := range []int{0, 2, tasksProtocol + 1} {
+	for _, protocol := range []int{0, 2, tasksProtocol - 1, tasksProtocol + 1} {
 		t.Run(fmt.Sprint(protocol), func(t *testing.T) {
 			dir := t.TempDir()
 			marker := filepath.Join(dir, "calls")

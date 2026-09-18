@@ -53,6 +53,31 @@ changing servers also clears the project selection. Grace is the first-run serve
 A missing server requires explicit
 selection; destinations are never silently substituted.
 
+For a new Git worktree, the Environment picker reads existing
+`.codex/environments/*.toml` files on the selected host/project. A sole environment
+is selected automatically. Multiple environments require a choice; **None** skips
+setup. Explicit choices, including None, are remembered per host/project path.
+Missing or invalid saved selections block sending until you choose again. Discovery
+errors have a retry button. Existing checkouts, non-Git folders, and projectless
+tasks do not run environment setup.
+
+The CLI reads the selected configuration from the source checkout, then runs its
+setup script through Codex's `command/exec` with Bash in the new worktree before
+starting the task. Linux setup overrides are respected. Setup uses the server's
+computed environment, without interactive input, and has a ten-minute limit.
+It requests `dangerFullAccess` to preserve its existing account-level setup access;
+server requirements may reject it. The later task's permissions are unaffected.
+There is no fallback to the SSH subprocess runner. The modal shows preparation status;
+background sends still close immediately and notify after delivery. A failed setup
+retains the worktree and displays its path, readable diagnostic output, and a setup
+log path on the destination host. Nonempty setup runs stream to private mode-0600
+files under `CODEX_HOME/codex-tasks/setup-logs`. Capture is limited to 1 MiB per stream
+and 2 MiB per log plus metadata. Logs older than seven days expire on the next
+nonempty setup; script output is not written to the activity log. Inspect failures
+before creating again; the retained submission cannot be resent from the modal.
+No environment editing or action buttons are provided. CLI helpers on both ends
+must support protocol 5; incompatible peers are rejected before creation.
+
 Opening uses cached project choices with a background refresh. A host change
 loads that host's cache and refreshes it. No typing-triggered requests or polling.
 Send & open sends once and waits up to ten seconds for readable user-message history

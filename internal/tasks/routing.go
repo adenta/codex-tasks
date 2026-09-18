@@ -95,7 +95,7 @@ func executeAt(ctx context.Context, p endpoints.Config, o Options, r *Result) er
 }
 
 // Increment when the remote request contract changes; peers must match exactly.
-const tasksProtocol = 3
+const tasksProtocol = 5
 
 // Read-only handshake precedes dispatch; the executing helper checks the same
 // identity and protocol again before touching any task.
