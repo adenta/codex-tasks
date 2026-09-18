@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -73,6 +74,20 @@ func executeAt(ctx context.Context, p endpoints.Config, o Options, r *Result) er
 		return err
 	}
 	o.Target, o.Host = "", host
+	if len(o.Images) > 0 {
+		dir, images, err := stageImages(p, o.Images)
+		if err != nil {
+			r.ErrorCategory = "invalid_image"
+			return err
+		}
+		o.Images = images
+		defer func() {
+			// The remote host retains its own copy after submission.
+			if alias != "" || (r.Outcome != "unknown" && !r.InputAccepted) {
+				_ = os.RemoveAll(dir)
+			}
+		}()
+	}
 	if alias == "" {
 		return executeLocal(ctx, p, o, r)
 	}
@@ -81,7 +96,7 @@ func executeAt(ctx context.Context, p endpoints.Config, o Options, r *Result) er
 
 // Read-only handshake precedes dispatch; the executing helper checks the same
 // identity and protocol again before touching any task.
-func checkRemoteTasks(ctx context.Context, alias, host, account string, r *Result, launcher ...bool) error {
+func checkRemoteTasks(ctx context.Context, alias, host, account string, r *Result, requireLauncher, requireImages bool) error {
 	cmd := exec.CommandContext(ctx, "ssh", "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-o", "StrictHostKeyChecking=yes", "--", alias, endpoints.Command, "_capabilities")
 	var output limitedBuffer
 	var diagnostic diagnosticBuffer
@@ -90,6 +105,7 @@ func checkRemoteTasks(ctx context.Context, alias, host, account string, r *Resul
 	var cap struct {
 		Protocol int    `json:"tasks_protocol"`
 		Launcher bool   `json:"remote_launcher"`
+		Images   bool   `json:"image_attachments"`
 		Host     string `json:"host"`
 		Account  string `json:"account"`
 	}
@@ -105,9 +121,13 @@ func checkRemoteTasks(ctx context.Context, alias, host, account string, r *Resul
 		r.ErrorCategory = "remote_incompatible"
 		return fmt.Errorf("update codex-tasks on %s before using task tools v2. No task action was sent", host)
 	}
-	if len(launcher) > 0 && launcher[0] && !cap.Launcher {
+	if requireLauncher && !cap.Launcher {
 		r.ErrorCategory = "remote_incompatible"
 		return fmt.Errorf("update codex-tasks on %s for remote launcher support; no task was created", host)
+	}
+	if requireImages && !cap.Images {
+		r.ErrorCategory = "remote_incompatible"
+		return fmt.Errorf("update codex-tasks on %s for image attachments; no task was submitted", host)
 	}
 	if cap.Host != host || cap.Account != account {
 		r.ErrorCategory = "destination_mismatch"

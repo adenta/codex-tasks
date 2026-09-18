@@ -28,6 +28,13 @@ codex-tasks result metadata uses snake_case. Clients should tolerate additional 
 Private remote requests require protocol 2 and an exact destination account;
 the private read-only handshake returns `tasks_protocol`, `host`, `account`, and `build_id`. This is internal, not a new public capability
 command or desktop-control interface.
+Image-capable helpers additionally return `image_attachments: true`. Image
+requests carry an `images` array of absolute receiving-host paths; image bytes
+travel over SFTP before the ordinary request, never in the JSON envelope. The
+internal `_images` staging helper checks the expected host/account before
+allocating or removing a private staging directory. Old helpers are rejected
+before uploads or task submission. `_clipboard-image` and `_discard-images` are
+local launcher helpers; they do not modify tasks or require a running server.
 
 Find coverage statuses are `complete`, `more`, and `unavailable`. `found` does not imply complete coverage. `ambiguous`
 counts matches over continued pages. `not_found` is only returned for a completed
@@ -49,7 +56,7 @@ against the same limit and character bound; reasoning stays omitted.
 Failure categories include `route_unavailable`, `unsupported_operation`,
 `transport_unavailable`, `remote_incompatible`, `destination_mismatch`,
 `server_rejected`, `transport_uncertain`, `observation_unavailable`, and
-`operation_failed`. SSH diagnostics retain at most 2048 bytes internally and
+`operation_failed`, `invalid_image`, and `image_upload_failed`. SSH diagnostics retain at most 2048 bytes internally and
 expose only recognized transport reasons or a bounded process error. Arbitrary
 remote stderr is not returned. Exit 0 means the command returned successfully
 (including incomplete discovery); 1 means failed/partial operation; 2 means

@@ -250,7 +250,7 @@ func (s *service) create(ctx context.Context, o Options, r *Result) error {
 		}
 		r.Outcome = "created"
 	}
-	if o.Message != "" {
+	if o.Message != "" || len(o.Images) > 0 {
 		if err := s.message(ctx, o, r); err != nil {
 			return err
 		}

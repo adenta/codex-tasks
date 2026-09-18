@@ -129,7 +129,8 @@ stream_max_retries = 0
 	o.Title = "Persisted lifecycle fixture"
 	o.Mode = "plan"
 	o.Model = "" // Use the effective configured model and reasoning.
-	o.Message = "Reply exactly done. Do not call tools."
+	o.Images = []string{testPNG(t, root)}
+	o.WaitHistory = true
 	o.Wait = 10 * time.Second
 	created := Result{Outcome: "ok"}
 	if err := s.execute(ctx, o, &created); err != nil {
@@ -139,6 +140,14 @@ stream_max_retries = 0
 	if created.Task == nil || created.Task.ProjectID == "" || created.Task.Name != o.Title {
 		client.Close()
 		t.Fatalf("project/title missing: %+v", created)
+	}
+	if !created.HistoryReady {
+		t.Fatal("image-only user history was not readable")
+	}
+	// Completed ingestion must persist the image across cold resume even when
+	// the original local file no longer exists.
+	if err := os.Remove(o.Images[0]); err != nil {
+		t.Fatal(err)
 	}
 	id := created.Task.ID
 	message := opts("message", id)
@@ -203,6 +212,9 @@ stream_max_retries = 0
 	for i, payload := range captured {
 		if !strings.Contains(payload, "Plan Mode") {
 			t.Fatalf("request %d lost Plan mode", i)
+		}
+		if !strings.Contains(payload, "input_image") || !strings.Contains(payload, "data:image/png;base64,") {
+			t.Fatalf("request %d lost the file image across history/resume", i)
 		}
 	}
 	fork := Result{Outcome: "ok"}

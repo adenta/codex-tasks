@@ -20,6 +20,10 @@ Item {
   property string status: ""
   property string taskId: ""
   property string message: ""
+  property var images: []
+  property int draftGeneration: 0
+  property bool pasting: false
+  signal pasteTextRequested()
   property var servers: []
   property var desktopProjects: []
   property var cache: ({})
@@ -42,7 +46,7 @@ Item {
   }
   readonly property var selectedProject: projects.find(function(p) { return p.id === root.projectId }) || null
   readonly property bool validServer: servers.some(function(s) { return s.value === root.host })
-  readonly property bool canSend: !busy && !uncertain && validServer && message.trim().length > 0 && (projectId === "" || (selectedProject !== null && !selectedProject.unavailable))
+  readonly property bool canSend: !busy && !pasting && !uncertain && validServer && (message.trim().length > 0 || images.length > 0) && (projectId === "" || (selectedProject !== null && !selectedProject.unavailable))
   readonly property var projectOptions: {
     var list = [{value:"", label:"No project"}]
     projects.forEach(function(p) { list.push({value:p.id,label:(p.name || p.id) + (p.unavailable ? " (unavailable)" : "")}) })
@@ -69,7 +73,7 @@ Item {
   function open(payload) {
     if (opened) { root.focusEditor(); return }
     opened=true
-    if (!busy && !recoveryPending) { status=""; uncertain=false;taskId="";message="" }
+    if (!busy && !recoveryPending) { status=""; uncertain=false;taskId="";clearDraft() }
     var name=Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : ""
     targetScreen=Quickshell.screens.find(function(s){return s.name===name}) || Quickshell.screens[0]
     if (!targetsProcess.running) targetsProcess.running=true
@@ -78,7 +82,7 @@ Item {
   }
   function close() {
     opened=false
-    if (!busy) { message=""; recoveryPending=false }
+    if (!busy) { clearDraft(); recoveryPending=false }
   }
   function dismiss() {
     if (busy && !createProcess.background) return
@@ -86,6 +90,24 @@ Item {
     if(shell && typeof shell.hide === "function") shell.hide("adenta.codex-tasks")
   }
   function toggle() { open("{}") }
+  function discardImages(items) {
+    cleanupProcess.pending=cleanupProcess.pending.concat(items.map(function(item){return item.path}))
+    cleanupProcess.next()
+  }
+  function clearDraft() {
+    draftGeneration++;message="";discardImages(images);images=[]
+  }
+  function removeImage(index) {
+    if(busy || uncertain || pasting)return
+    var next=images.slice();discardImages(next.splice(index,1));images=next
+  }
+  function pasteClipboard() {
+    if(busy || uncertain || pasting)return
+    pasting=true
+    clipboardProcess.generation=draftGeneration
+    clipboardProcess.command=[cli,"_clipboard-image"]
+    clipboardProcess.running=true
+  }
   function changeHost(value) {
     host=value;projectId=projectMemory[host] || "";remember();status="";refresh()
   }
@@ -99,6 +121,7 @@ Item {
   function send(background) {
     if (!canSend) return
     var args=[cli,"create","--host",host,"--message-file","-","--json"]
+    images.forEach(function(item){args.push("--image",item.path)})
     if (!background) args.push("--wait-history")
     if(projectId) {
       var p=selectedProject
@@ -195,7 +218,7 @@ Item {
         root.taskId=data.task ? data.task.id || "" : ""
         if(code===0 && data.input_accepted && (background || data.history_ready) && root.taskId) {
           if(background) {
-            root.message="";root.status="Task sent to " + root.host + "."
+            root.clearDraft();root.status="Task sent to " + root.host + "."
             root.notifyDelivery(true, root.taskId)
           } else root.openTask()
           return
@@ -206,6 +229,35 @@ Item {
       }catch(e){root.uncertain=true;root.status="Could not confirm delivery. Check tasks on " + root.host + " before sending again. " + String(createError.text || e)}
       if(background) { root.recoveryPending=true;root.notifyDelivery(false, root.taskId) }
     }
+  }
+  Process {
+    id: clipboardProcess
+    property int generation: 0
+    stdout: StdioCollector { id: clipboardOutput }
+    stderr: StdioCollector { id: clipboardError }
+    onExited: function(code) {
+      root.pasting=false
+      try {
+        if(code!==0)throw new Error(clipboardError.text || "Could not read clipboard")
+        var data=JSON.parse(clipboardOutput.text)
+        if(generation!==root.draftGeneration || !root.opened) {
+          if(data.image)root.discardImages([data])
+          return
+        }
+        if(!data.image){root.pasteTextRequested();return}
+        if(root.images.length>=8){root.discardImages([data]);root.status="You can attach up to 8 images.";return}
+        root.images=root.images.concat([data]);root.status=""
+      }catch(e){if(generation===root.draftGeneration && root.opened)root.status=String(e)}
+    }
+  }
+  Process {
+    id: cleanupProcess
+    property var pending: []
+    function next() {
+      if(running || !pending.length)return
+      command=[root.cli,"_discard-images"].concat(pending);pending=[];running=true
+    }
+    onExited: Qt.callLater(function(){cleanupProcess.next()})
   }
   property bool windowEnabled: true
   readonly property bool refreshing: projectProcess.running && projectProcess.fetchHost===host
