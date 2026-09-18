@@ -64,7 +64,7 @@ import qs.Ui
               background:null
               Keys.onPressed:function(event){
                 if(event.key===Qt.Key_Escape){root.dismiss();event.accepted=true}
-                else if((event.key===Qt.Key_Return || event.key===Qt.Key_Enter) && !(event.modifiers & Qt.ShiftModifier) && !inputMethodComposing){root.send(!!(event.modifiers & Qt.ControlModifier));event.accepted=true}
+                else if((event.key===Qt.Key_Return || event.key===Qt.Key_Enter) && !(event.modifiers & Qt.ShiftModifier) && !inputMethodComposing){root.send(!!(event.modifiers & Qt.AltModifier));event.accepted=true}
               }
             }
           }
@@ -74,13 +74,13 @@ import qs.Ui
           QQC.BusyIndicator { width:Style.space(24);height:width;running:root.busy;visible:running }
           Text { width:parent.width-(root.busy ? Style.space(34):0);text:root.status;color:Color.popups.text;font.family:Style.font.family;font.pixelSize:Style.space(13);wrapMode:Text.Wrap }
         }
-        Text { width:parent.width;text:"Enter to send & open · Ctrl+Enter to send in background\nShift+Enter for a new line";color:Qt.alpha(Color.popups.text,0.6);font.family:Style.font.family;font.pixelSize:Style.space(12);wrapMode:Text.Wrap }
+        Text { width:parent.width;text:"Enter to send & open · Alt+Enter to send in background\nShift+Enter for a new line";color:Qt.alpha(Color.popups.text,0.6);font.family:Style.font.family;font.pixelSize:Style.space(12);wrapMode:Text.Wrap }
         Flow {
           width:parent.width;spacing:Style.space(10)
           Button {
             text:"Send in background";height:Style.space(40)
             bordered:true;focusable:true;enabled:root.canSend
-            tooltipText:"Ctrl+Enter · Close immediately without opening Codex"
+            tooltipText:"Alt+Enter · Close immediately without opening Codex"
             onClicked:root.send(true)
           }
           Button { id:openButton;visible:root.taskId!=="";text:"Open task";bordered:true;focusable:true;enabled:!root.busy;onClicked:root.openTask() }

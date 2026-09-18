@@ -19,7 +19,7 @@ Check existing bindings before replacing one. Reload Hyprland and check errors.
 The plugin can also be opened with that shell command. Uses the CLI installed at
 `~/.local/bin/codex-tasks` and remote hosts in its normal configuration.
 
-Enter sends and opens Codex; Ctrl+Enter sends in the background and closes the
+Enter sends and opens Codex; Alt+Enter sends in the background and closes the
 modal immediately without opening Codex. Both actions have separate buttons.
 Shift+Enter adds a newline; Escape closes and discards an idle prompt.
 The server, project per server, Git execution choice, and cached project lists
