@@ -33,7 +33,7 @@ func TestMissingProviderDoesNotRetryOrSendMessage(t *testing.T) {
 func TestRemoteTransportsMappedProvider(t *testing.T) {
 	dir := t.TempDir()
 	captured := filepath.Join(dir, "request.json")
-	script := "#!/bin/sh\nfor arg do last=$arg; done\nif [ \"$last\" = _capabilities ]; then printf '%s\\n' '{\"tasks_protocol\":2,\"model_provider\":true,\"host\":\"grace\",\"account\":\"agent\"}'; exit 0; fi\n/bin/cat > '" + captured + "'\nexit 255\n"
+	script := "#!/bin/sh\nfor arg do last=$arg; done\nif [ \"$last\" = _capabilities ]; then printf '%s\\n' '{\"tasks_protocol\":3,\"host\":\"grace\",\"account\":\"agent\"}'; exit 0; fi\n/bin/cat > '" + captured + "'\nexit 255\n"
 	if err := os.WriteFile(filepath.Join(dir, "ssh"), []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
