@@ -212,7 +212,7 @@ func (s *service) create(ctx context.Context, o Options, r *Result) error {
 		r.Worktree = workspace
 	}
 	if environment != nil {
-		if err := runEnvironmentSetup(ctx, workspace, environment, r); err != nil {
+		if err := s.runEnvironmentSetup(ctx, workspace, environment, r); err != nil {
 			return err
 		}
 	}

@@ -63,15 +63,20 @@ fetch. --ref selects a requested ref; --checkout uses the existing checkout.
 Confirmed non-Git directories are used directly. --projectless omits assignment.
 --environment selects an existing filename inside the checkout's .codex/environments
 directory. The selected configuration is read before creation, then its setup
-script runs with Bash in the new worktree on the destination before any task starts.
+script runs through Codex command/exec with Bash in the new worktree before any task starts.
 The destination OS setup override replaces the default script when present.
-An empty script succeeds. Setup inherits the destination account environment, has
-no interactive stdin, and times out after 10 minutes. This runs the project's
-script directly as that account; task sandbox/approval settings do not govern it.
+An empty script succeeds. Setup uses the Codex server-computed environment, has
+no interactive stdin, and times out after 10 minutes. It requests dangerFullAccess
+to preserve account-level setup access; server requirements may reject it. This
+does not alter the later task's permissions. No subprocess fallback is attempted.
 Omitting --environment skips setup; --checkout and non-Git directories cannot use it.
 Failure retains the worktree and returns setup_status, setup_exit_code when known,
-and up to 8 KiB of setup_output. Inspect before retrying; scripts may have side effects.
-Setup output is not stored in the activity log. Scripts should avoid printing secrets.
+and up to 8 KiB of readable setup_output. A lost reply is unknown and never replayed.
+Inspect before retrying; scripts may have side effects. setup_log_path names a
+private destination file under CODEX_HOME/codex-tasks/setup-logs. Streamed output
+is captured up to 1 MiB per stream and 2 MiB per log plus metadata; line breaks
+are preserved. Logs older than seven days expire on the next nonempty setup.
+Output is not stored in the activity log. Scripts should avoid printing secrets.
 Omitted model/provider/mode preserve server defaults. Provider selection requires
 --model and an already-configured provider on the execution host. Optional
 --model-context-window supplies the custom model context limit. No credentials

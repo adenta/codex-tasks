@@ -48,6 +48,7 @@ type Result struct {
 	SetupStatus    string        `json:"setup_status,omitempty"`
 	SetupOutput    string        `json:"setup_output,omitempty"`
 	SetupExitCode  *int          `json:"setup_exit_code,omitempty"`
+	SetupLogPath   string        `json:"setup_log_path,omitempty"`
 	Workspace      string        `json:"workspace,omitempty"`
 	Coverage       []Coverage    `json:"coverage,omitempty"`
 	SearchComplete *bool         `json:"search_complete,omitempty"`
@@ -79,6 +80,7 @@ type Result struct {
 
 type rpc interface {
 	Call(context.Context, string, any, any) error
+	CommandExec(context.Context, map[string]any, *commandResult, func([]byte)) error
 }
 type service struct {
 	rpc       rpc

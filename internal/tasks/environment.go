@@ -2,6 +2,7 @@ package tasks
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -10,7 +11,6 @@ import (
 	"runtime"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/pelletier/go-toml/v2"
@@ -172,37 +172,117 @@ func (b *setupOutput) Write(p []byte) (int, error) {
 	return n, nil
 }
 
-func runEnvironmentSetup(ctx context.Context, workspace string, e *environmentConfig, r *Result) error {
-	r.SetupStatus = "running"
+// Logs are private to the destination account and expire after seven days.
+// Keep the first 2 MiB in the file and the final 8 KiB in the result.
+func (s *service) runEnvironmentSetup(ctx context.Context, workspace string, e *environmentConfig, r *Result) error {
+	r.SetupStatus = "failed"
 	if strings.TrimSpace(e.script()) == "" {
 		r.SetupStatus = "completed"
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, setupTimeout)
+	dir := filepath.Join(s.home, "codex-tasks", "setup-logs")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return fmt.Errorf("cannot create private setup log directory: %w", err)
+	}
+	info, err := os.Lstat(dir)
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("setup log directory must be a real directory")
+	}
+	if err := os.Chmod(dir, 0700); err != nil {
+		return err
+	}
+	entries, _ := os.ReadDir(dir)
+	for _, entry := range entries {
+		if !strings.HasPrefix(entry.Name(), "setup-") || !strings.HasSuffix(entry.Name(), ".log") {
+			continue
+		}
+		if info, err := entry.Info(); err == nil && info.Mode().IsRegular() && time.Since(info.ModTime()) > 7*24*time.Hour {
+			_ = os.Remove(filepath.Join(dir, entry.Name()))
+		}
+	}
+	log, err := os.CreateTemp(dir, "setup-*.log")
+	if err != nil {
+		return fmt.Errorf("cannot create setup log: %w", err)
+	}
+	r.SetupLogPath = log.Name()
+	defer log.Close()
+	var tail setupOutput
+	written := 0
+	var logErr error
+	write := func(data []byte) {
+		_, _ = tail.Write(data)
+		const limit = 2 << 20
+		if written >= limit || logErr != nil {
+			return
+		}
+		if len(data) > limit-written {
+			data = data[:limit-written]
+		}
+		n, err := log.Write(data)
+		written += n
+		if err != nil {
+			logErr = err
+		}
+		if written == limit {
+			_, logErr = log.WriteString("\n[Setup log limit reached; output truncated]\n")
+		}
+	}
+	write([]byte("Operation: " + r.OperationID + "\nWorktree: " + workspace + "\nSetup started via Codex command/exec at " + time.Now().UTC().Format(time.RFC3339) + "\n"))
+	if logErr != nil {
+		return fmt.Errorf("cannot write setup log; setup was not started: %w", logErr)
+	}
+	r.SetupStatus = "running"
+	ctx, cancel := context.WithTimeout(ctx, setupTimeout+5*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "bash", "-c", e.script())
-	cmd.Dir = workspace
-	cmd.Stdin = nil // Setup must not consume the user's task prompt.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
-	cmd.WaitDelay = time.Second
-	var output setupOutput
-	cmd.Stdout, cmd.Stderr = &output, &output
-	err := cmd.Run()
-	if err == nil {
+	var reply commandResult
+	params := map[string]any{
+		"command": []string{"bash", "-c", e.script()}, "cwd": workspace,
+		"processId": filepath.Base(r.SetupLogPath), "streamStdoutStderr": true,
+		"timeoutMs": setupTimeout.Milliseconds(), "outputBytesCap": 1 << 20,
+		// Environment setup already runs as the destination account, outside the
+		// later task's sandbox. Server requirements may still reject this request.
+		"sandboxPolicy": map[string]any{"type": "dangerFullAccess"},
+	}
+	err = s.rpc.CommandExec(ctx, params, &reply, write)
+	if err != nil {
+		r.SetupStatus, r.ErrorCategory = "unknown", "environment_setup_uncertain"
+		var rejected *RPCError
+		if errors.As(err, &rejected) {
+			r.SetupStatus, r.ErrorCategory = "failed", "environment_setup_failed"
+		} else {
+			s.uncertain = true
+		}
+		write([]byte("\nSetup " + r.SetupStatus + ": " + err.Error() + "\n"))
+	} else if reply.ExitCode == nil {
+		r.SetupStatus, r.ErrorCategory = "unknown", "environment_setup_uncertain"
+		s.uncertain = true
+		err = fmt.Errorf("Codex did not return a setup exit code")
+		write([]byte("\nSetup unknown: " + err.Error() + "\n"))
+	} else {
+		// Buffered fields should be empty for streaming; retain any returned diagnostics.
+		write([]byte(reply.Stdout))
+		write([]byte(reply.Stderr))
+		r.SetupExitCode = reply.ExitCode
 		r.SetupStatus = "completed"
+		if *reply.ExitCode != 0 {
+			r.SetupStatus, r.ErrorCategory = "failed", "environment_setup_failed"
+		}
+		if *reply.ExitCode == 124 {
+			r.SetupStatus = "timed_out"
+		}
+		write([]byte(fmt.Sprintf("\nSetup %s (exit %d)\n", r.SetupStatus, *reply.ExitCode)))
+	}
+	if err := log.Sync(); err != nil {
+		logErr = err
+	}
+	if logErr != nil && r.SetupStatus == "completed" {
+		r.SetupStatus, r.ErrorCategory = "failed", "environment_setup_log_failed"
+	}
+	if r.SetupStatus == "completed" {
 		return nil
 	}
-	r.SetupStatus, r.ErrorCategory = "failed", "environment_setup_failed"
-	r.SetupOutput = clean(string(output.data), 8192)
-	if cmd.ProcessState != nil {
-		code := cmd.ProcessState.ExitCode()
-		r.SetupExitCode = &code
-	}
-	if ctx.Err() != nil {
-		r.SetupStatus = "timed_out"
-	}
-	return fmt.Errorf("environment setup %s; no task started. Inspect retained worktree %s before creating again", r.SetupStatus, workspace)
+	r.SetupOutput = readable(string(tail.data))
+	return fmt.Errorf("environment setup %s; no task started. Inspect the retained worktree and setup log before creating again", r.SetupStatus)
 }
 
 func operationTimeout(o Options) time.Duration {

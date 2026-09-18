@@ -282,7 +282,7 @@ func TestV2SelectorsAndDestinationRejection(t *testing.T) {
 func TestDestinationHandshakeBlocksMutation(t *testing.T) {
 	dir := t.TempDir()
 	marker := filepath.Join(dir, "mutation")
-	script := "#!/bin/sh\nfor arg do last_arg=$arg; done\nif [ \"$last_arg\" = _capabilities ]; then printf '%s\\n' '{\"tasks_protocol\":4,\"host\":\"love\",\"account\":\"wrong\"}'; exit 0; fi\nprintf x > '" + marker + "'\n"
+	script := "#!/bin/sh\nfor arg do last_arg=$arg; done\nif [ \"$last_arg\" = _capabilities ]; then printf '%s\\n' '{\"tasks_protocol\":5,\"host\":\"love\",\"account\":\"wrong\"}'; exit 0; fi\nprintf x > '" + marker + "'\n"
 	if err := os.WriteFile(filepath.Join(dir, "ssh"), []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}

@@ -180,7 +180,7 @@ args = ["-c", "printf fake-command-key"]
 		if err := os.MkdirAll(envDir, 0700); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(envDir, "environment.toml"), []byte("version=1\n[setup]\nscript='printf ready > setup-ready'\n"), 0600); err != nil {
+		if err := os.WriteFile(filepath.Join(envDir, "environment.toml"), []byte("version=1\n[setup]\nscript=\"printf ready > setup-ready; printf 'setup stdout\\\\n'; printf 'setup stderr\\\\n' >&2\"\n"), 0600); err != nil {
 			t.Fatal(err)
 		}
 		o.Environment = "environment.toml"
@@ -239,6 +239,9 @@ args = ["-c", "printf fake-command-key"]
 		}
 		if b, err := os.ReadFile(filepath.Join(created.Worktree, "setup-ready")); err != nil || string(b) != "ready" {
 			t.Fatalf("setup did not prepare task worktree: %s %v", b, err)
+		}
+		if b, err := os.ReadFile(created.SetupLogPath); err != nil || !strings.Contains(string(b), "setup stdout\n") || !strings.Contains(string(b), "setup stderr\n") || !strings.Contains(string(b), "Setup completed (exit 0)") {
+			t.Fatalf("setup log missing streamed output: %q %v", b, err)
 		}
 		if err := s.progress(ctx, Options{Wait: 10 * time.Second, TurnID: created.TurnID}, &created); err != nil {
 			t.Fatal(err)

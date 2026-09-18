@@ -3,6 +3,7 @@ package tasks
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -80,7 +81,29 @@ func TestEnvironmentSetupBeforeTask(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := environmentFixture(t, "version=1\n[setup]\nscript=\"\"\"\n"+tc.script+"\n\"\"\"\n")
 			calls := 0
+			setupCalls := 0
 			s := service{home: t.TempDir(), rpc: &fakeRPC{handle: func(method string, p map[string]any) (any, error) {
+				if method == "command/exec" {
+					setupCalls++
+					command := p["command"].([]string)
+					if len(command) != 3 || command[0] != "bash" || command[1] != "-c" || strings.TrimSpace(command[2]) != tc.script {
+						t.Fatal("wrong setup command", command)
+					}
+					if p["timeoutMs"] != setupTimeout.Milliseconds() || p["streamStdoutStderr"] != true {
+						t.Fatal("missing command controls", p)
+					}
+					cwd := p["cwd"].(string)
+					if cwd == repo {
+						t.Fatal("setup in source checkout")
+					}
+					if err := os.WriteFile(filepath.Join(cwd, "prepared"), []byte(cwd), 0600); err != nil {
+						t.Fatal(err)
+					}
+					if !tc.success {
+						return map[string]any{"exitCode": 17, "stderr": "fixture failure\nsecond line\n"}, nil
+					}
+					return map[string]any{"exitCode": 0, "stdout": "fixture output\n"}, nil
+				}
 				calls++
 				if !tc.success || method != "thread/start" {
 					t.Fatal("unexpected RPC", method)
@@ -104,12 +127,27 @@ func TestEnvironmentSetupBeforeTask(t *testing.T) {
 					t.Fatalf("%+v %v calls=%d", r, err, calls)
 				}
 			} else {
-				if err == nil || calls != 0 || r.Task != nil || r.SetupStatus != "failed" || r.SetupExitCode == nil || *r.SetupExitCode != 17 || r.SetupOutput != "fixture failure" {
+				if err == nil || calls != 0 || r.Task != nil || r.SetupStatus != "failed" || r.SetupExitCode == nil || *r.SetupExitCode != 17 || !strings.Contains(r.SetupOutput, "fixture failure\nsecond line\n") {
 					t.Fatalf("%+v %v calls=%d", r, err, calls)
 				}
 				if _, err := os.Stat(filepath.Join(r.Worktree, "prepared")); err != nil {
 					t.Fatal("failed worktree not retained", err)
 				}
+			}
+			if tc.script != "" {
+				if setupCalls != 1 {
+					t.Fatal("setup replayed or missing", setupCalls)
+				}
+				info, err := os.Stat(r.SetupLogPath)
+				if err != nil || info.Mode().Perm() != 0600 {
+					t.Fatal("setup log is not private", err)
+				}
+				b, err := os.ReadFile(r.SetupLogPath)
+				if err != nil || !strings.Contains(string(b), "Setup "+r.SetupStatus) {
+					t.Fatal("setup log incomplete", err)
+				}
+			} else if setupCalls != 0 {
+				t.Fatal("empty setup made command call")
 			}
 			if _, err := os.Stat(filepath.Join(repo, "prepared")); !os.IsNotExist(err) {
 				t.Fatal("setup modified original checkout")
@@ -144,17 +182,33 @@ func TestInvalidEnvironmentStopsBeforeCreation(t *testing.T) {
 
 func TestEnvironmentTimeoutAndBoundedOutput(t *testing.T) {
 	e := &environmentConfig{}
-	e.Setup.Script = "printf started; sleep 30; touch should-not-exist"
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-	r := Result{}
-	dir := t.TempDir()
-	start := time.Now()
-	if err := runEnvironmentSetup(ctx, dir, e, &r); err == nil || r.SetupStatus != "timed_out" || time.Since(start) > 3*time.Second {
-		t.Fatalf("%+v %v", r, err)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "should-not-exist")); !os.IsNotExist(err) {
-		t.Fatal("setup continued after timeout")
+	e.Setup.Script = "fixture command"
+	for _, tc := range []struct {
+		name      string
+		reply     any
+		err       error
+		status    string
+		uncertain bool
+	}{
+		{"timeout", map[string]any{"exitCode": 124, "stdout": "begin\n"}, nil, "timed_out", false},
+		{"disconnect", nil, errors.New("disconnected"), "unknown", true},
+		{"unsupported", nil, &RPCError{Method: "command/exec", Code: -32601, Message: "unsupported"}, "failed", false},
+		{"missing-exit", map[string]any{}, nil, "unknown", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			s := service{home: t.TempDir(), rpc: &fakeRPC{handle: func(m string, p map[string]any) (any, error) {
+				calls++
+				if m != "command/exec" {
+					t.Fatal(m)
+				}
+				return tc.reply, tc.err
+			}}}
+			r := Result{}
+			if err := s.runEnvironmentSetup(context.Background(), t.TempDir(), e, &r); err == nil || r.SetupStatus != tc.status || s.uncertain != tc.uncertain || calls != 1 {
+				t.Fatalf("%+v %v calls=%d", r, err, calls)
+			}
+		})
 	}
 	var b setupOutput
 	b.Write([]byte(strings.Repeat("x", 20000)))
@@ -188,5 +242,40 @@ func TestEnvironmentOptionsAndRemoteDiscovery(t *testing.T) {
 	var r Result
 	if err := json.Unmarshal([]byte(out.String()), &r); err != nil || r.Error != "" || len(r.Environments) != 1 || r.Environments[0].Name != "Remote" {
 		t.Fatalf("%+v %v", r, err)
+	}
+}
+
+func TestSetupLogBoundsAndRetention(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(home, "codex-tasks", "setup-logs")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	old := filepath.Join(dir, "setup-old.log")
+	if err := os.WriteFile(old, []byte("old"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	ago := time.Now().Add(-8 * 24 * time.Hour)
+	if err := os.Chtimes(old, ago, ago); err != nil {
+		t.Fatal(err)
+	}
+	e := &environmentConfig{}
+	e.Setup.Script = "fixture"
+	s := service{home: home, rpc: &fakeRPC{handle: func(m string, p map[string]any) (any, error) {
+		return map[string]any{"exitCode": 1, "stdout": strings.Repeat("x", 3<<20), "stderr": "\nlast line\n"}, nil
+	}}}
+	r := Result{}
+	if err := s.runEnvironmentSetup(context.Background(), t.TempDir(), e, &r); err == nil {
+		t.Fatal("failure lost")
+	}
+	if _, err := os.Stat(old); !os.IsNotExist(err) {
+		t.Fatal("old log retained")
+	}
+	info, err := os.Stat(r.SetupLogPath)
+	if err != nil || info.Size() > (2<<20)+100 || info.Mode().Perm() != 0600 {
+		t.Fatal("invalid log bounds or mode", info, err)
+	}
+	if !strings.Contains(r.SetupOutput, "\nlast line\n") {
+		t.Fatal("tail/newlines lost")
 	}
 }

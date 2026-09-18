@@ -31,6 +31,9 @@ func render(w io.Writer, r Result, asJSON bool) {
 	if r.SetupOutput != "" {
 		fmt.Fprintln(w, r.SetupOutput)
 	}
+	if r.SetupLogPath != "" {
+		fmt.Fprintln(w, "Setup log on "+location+":", r.SetupLogPath)
+	}
 	if r.Action == "find" {
 		if len(r.Tasks) == 0 {
 			fmt.Fprintln(w, "No matching tasks were returned on this page.")
