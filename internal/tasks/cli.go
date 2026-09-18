@@ -358,7 +358,7 @@ func Run(paths endpoints.Config, args []string, stdin io.Reader, stdout, stderr 
 		if len(args) != 1 {
 			return 2
 		}
-		_ = json.NewEncoder(stdout).Encode(map[string]any{"tasks_protocol": 2, "remote_launcher": true, "image_attachments": true, "model_provider": true, "build_id": buildinfo.BuildID, "host": string(paths.Host), "account": paths.Account})
+		_ = json.NewEncoder(stdout).Encode(map[string]any{"tasks_protocol": tasksProtocol, "build_id": buildinfo.BuildID, "host": string(paths.Host), "account": paths.Account})
 		return 0
 	}
 	if args[0] == "_remote" {
@@ -504,7 +504,7 @@ func dispatch(ctx context.Context, alias string, o Options, r *Result) error {
 	if r.Account == "" {
 		return fmt.Errorf("expected destination account is required")
 	}
-	if err := checkRemoteTasks(ctx, alias, strings.ToLower(o.Host), r.Account, r, o.WaitHistory || (o.Projectless && o.CWD == ""), len(o.Images) > 0, o.ModelProvider != ""); err != nil {
+	if err := checkRemoteTasks(ctx, alias, strings.ToLower(o.Host), r.Account, r); err != nil {
 		r.Outcome = "failed"
 		return err
 	}
@@ -536,7 +536,7 @@ func dispatch(ctx context.Context, alias string, o Options, r *Result) error {
 			return err
 		}
 	}
-	b, _ := json.Marshal(remoteRequest{Version: 2, Account: r.Account, Options: o})
+	b, _ := json.Marshal(remoteRequest{Version: tasksProtocol, Account: r.Account, Options: o})
 	cmd := exec.CommandContext(ctx, "ssh", "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-o", "StrictHostKeyChecking=yes", "--", alias, endpoints.Command, "_remote")
 	cmd.Stdin = strings.NewReader(string(b))
 	// Bound transport output, including noise from remote shell startup files.
@@ -578,7 +578,7 @@ func runRemote(ctx context.Context, p endpoints.Config, args []string, stdin io.
 	var request remoteRequest
 	decoder := json.NewDecoder(io.LimitReader(stdin, remoteLimit))
 	decoder.DisallowUnknownFields()
-	if decoder.Decode(&request) != nil || request.Version != 2 {
+	if decoder.Decode(&request) != nil || request.Version != tasksProtocol {
 		return 2
 	}
 	if err := validate(request.Options); err != nil {

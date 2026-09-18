@@ -36,7 +36,8 @@ go build -trimpath -o build/codex-tasks ./cmd/codex-tasks
 
 When ready to install, copy `build/codex-tasks` into an existing user bin directory
 on PATH. Repeat on each account where you want to run commands, including remote
-accounts. Nothing installs automatically; no service or fleet tooling is included.
+accounts. Remote peers must use the same protocol version; mismatches fail before
+any task action. Nothing installs automatically; no service or fleet tooling is included.
 `make dist` builds a local Linux archive and checksum without publishing it.
 
 Optionally copy `skills/codex-tasks` into your Codex skills directory. The skill

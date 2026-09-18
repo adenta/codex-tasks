@@ -200,7 +200,11 @@ func TestImageTransportHelper(t *testing.T) {
 		if mode == "wrong-host" {
 			host = "other"
 		}
-		_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"tasks_protocol": 2, "remote_launcher": true, "image_attachments": mode != "old", "host": host, "account": "agent"})
+		protocol := tasksProtocol
+		if mode == "old" {
+			protocol--
+		}
+		_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"tasks_protocol": protocol, "host": host, "account": "agent"})
 	case "_images":
 		b, _ := io.ReadAll(os.Stdin)
 		var req imageRequest

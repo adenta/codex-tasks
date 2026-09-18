@@ -3,6 +3,7 @@ package tasks
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,7 +19,7 @@ func TestRemoteHelperProcess(t *testing.T) {
 	if json.NewDecoder(os.Stdin).Decode(&request) != nil {
 		os.Exit(2)
 	}
-	if request.Options.Message != "SECRET_PROMPT\n`literal` $(literal)" || request.Version != 2 {
+	if request.Options.Message != "SECRET_PROMPT\n`literal` $(literal)" || request.Version != tasksProtocol {
 		os.Exit(2)
 	}
 	r := Result{OperationID: request.Options.OperationID, Action: request.Options.Action, Host: "love", Account: "agent", Outcome: "failed", ErrorCategory: "server_rejected", Error: "fixture server rejected the operation"}
@@ -28,7 +29,7 @@ func TestRemoteHelperProcess(t *testing.T) {
 
 func TestRemoteUsesStdinRecordsOnceAndPreservesSemanticFailure(t *testing.T) {
 	dir := t.TempDir()
-	script := "#!/bin/sh\nfor arg do last_arg=$arg; done\nif [ \"$last_arg\" = _capabilities ]; then printf '%s\\n' '{\"tasks_protocol\":2,\"remote_launcher\":true,\"host\":\"love\",\"account\":\"agent\"}'; exit 0; fi\nexec '" + strings.ReplaceAll(os.Args[0], "'", "'\\''") + "' -test.run=^TestRemoteHelperProcess$\n"
+	script := "#!/bin/sh\nfor arg do last_arg=$arg; done\nif [ \"$last_arg\" = _capabilities ]; then printf '%s\\n' '{\"tasks_protocol\":3,\"host\":\"love\",\"account\":\"agent\"}'; exit 0; fi\nexec '" + strings.ReplaceAll(os.Args[0], "'", "'\\''") + "' -test.run=^TestRemoteHelperProcess$\n"
 	if err := os.WriteFile(filepath.Join(dir, "ssh"), []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +64,7 @@ func TestRemoteUsesStdinRecordsOnceAndPreservesSemanticFailure(t *testing.T) {
 func TestRemoteUncertainWriteIsNotRetried(t *testing.T) {
 	dir := t.TempDir()
 	marker := filepath.Join(dir, "calls")
-	script := "#!/bin/sh\nfor arg do last_arg=$arg; done\nif [ \"$last_arg\" = _capabilities ]; then printf '%s\\n' '{\"tasks_protocol\":2,\"host\":\"love\",\"account\":\"agent\"}'; exit 0; fi\nprintf x >> '" + marker + "'\nexit 255\n"
+	script := "#!/bin/sh\nfor arg do last_arg=$arg; done\nif [ \"$last_arg\" = _capabilities ]; then printf '%s\\n' '{\"tasks_protocol\":3,\"host\":\"love\",\"account\":\"agent\"}'; exit 0; fi\nprintf x >> '" + marker + "'\nexit 255\n"
 	if err := os.WriteFile(filepath.Join(dir, "ssh"), []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +108,7 @@ func TestRemotePreflightRejectsOldHostWithoutSending(t *testing.T) {
 
 func TestRemoteCompatibleHostReceivesExactMessageOnce(t *testing.T) {
 	dir := t.TempDir()
-	script := "#!/bin/sh\nfor arg do last_arg=$arg; done\nif [ \"$last_arg\" = _capabilities ]; then printf '%s\\n' '{\"tasks_protocol\":2,\"host\":\"love\",\"account\":\"agent\"}'; exit 0; fi\nexec '" + strings.ReplaceAll(os.Args[0], "'", "'\\''") + "' -test.run=^TestRemoteHelperProcess$\n"
+	script := "#!/bin/sh\nfor arg do last_arg=$arg; done\nif [ \"$last_arg\" = _capabilities ]; then printf '%s\\n' '{\"tasks_protocol\":3,\"host\":\"love\",\"account\":\"agent\"}'; exit 0; fi\nexec '" + strings.ReplaceAll(os.Args[0], "'", "'\\''") + "' -test.run=^TestRemoteHelperProcess$\n"
 	if err := os.WriteFile(filepath.Join(dir, "ssh"), []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -121,5 +122,48 @@ func TestRemoteCompatibleHostReceivesExactMessageOnce(t *testing.T) {
 	r := Result{Account: "agent"}
 	if err := dispatch(context.Background(), "love", o, &r); err != nil || r.ErrorCategory != "server_rejected" {
 		t.Fatalf("%+v %v", r, err)
+	}
+}
+
+func TestRemoteProtocolMismatchStopsBeforeDispatch(t *testing.T) {
+	for _, protocol := range []int{0, 2, tasksProtocol + 1} {
+		t.Run(fmt.Sprint(protocol), func(t *testing.T) {
+			dir := t.TempDir()
+			marker := filepath.Join(dir, "calls")
+			script := fmt.Sprintf("#!/bin/sh\nfor arg do last_arg=$arg; done\nprintf '%%s\\n' \"$last_arg\" >> '%s'\nprintf '%%s\\n' '{\"tasks_protocol\":%d,\"host\":\"grace\",\"account\":\"agent\"}'\n", marker, protocol)
+			if err := os.WriteFile(filepath.Join(dir, "ssh"), []byte(script), 0700); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", dir)
+			p, _ := fixtureRole("xps")
+			p.CodexHome = t.TempDir()
+			o := opts("message", storedTask().ID)
+			o.Host, o.Message, o.JSON = "grace", "Do not send", true
+			var out, stderr strings.Builder
+			if code := run(context.Background(), p, o, &out, &stderr); code != 1 {
+				t.Fatalf("expected failure, got %d: %s", code, out.String())
+			}
+			var r Result
+			if err := json.Unmarshal([]byte(out.String()), &r); err != nil {
+				t.Fatal(err)
+			}
+			if r.Outcome != "failed" || r.ErrorCategory != "remote_incompatible" || r.InputAccepted || !strings.Contains(r.Error, "protocol mismatch") {
+				t.Fatalf("unexpected result: %+v", r)
+			}
+			if b, _ := os.ReadFile(marker); string(b) != "_capabilities\n" {
+				t.Fatalf("dispatched after mismatch: %s", b)
+			}
+		})
+	}
+}
+
+func TestRemoteRejectsOldRequestProtocol(t *testing.T) {
+	p, _ := fixtureRole("xps")
+	o := opts("message", storedTask().ID)
+	o.Message = "Do not send"
+	b, _ := json.Marshal(remoteRequest{Version: 2, Account: p.Account, Options: o})
+	var out strings.Builder
+	if code := runRemote(context.Background(), p, nil, strings.NewReader(string(b)), &out); code != 2 || out.Len() != 0 {
+		t.Fatalf("old request was executed: %d %s", code, out.String())
 	}
 }

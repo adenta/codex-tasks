@@ -94,21 +94,21 @@ func executeAt(ctx context.Context, p endpoints.Config, o Options, r *Result) er
 	return dispatch(ctx, alias, o, r)
 }
 
+// Increment when the remote request contract changes; peers must match exactly.
+const tasksProtocol = 3
+
 // Read-only handshake precedes dispatch; the executing helper checks the same
 // identity and protocol again before touching any task.
-func checkRemoteTasks(ctx context.Context, alias, host, account string, r *Result, requireLauncher, requireImages, requireProvider bool) error {
+func checkRemoteTasks(ctx context.Context, alias, host, account string, r *Result) error {
 	cmd := exec.CommandContext(ctx, "ssh", "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-o", "StrictHostKeyChecking=yes", "--", alias, endpoints.Command, "_capabilities")
 	var output limitedBuffer
 	var diagnostic diagnosticBuffer
 	cmd.Stdout, cmd.Stderr = &output, &diagnostic
 	err := cmd.Run()
 	var cap struct {
-		Protocol      int    `json:"tasks_protocol"`
-		Launcher      bool   `json:"remote_launcher"`
-		Images        bool   `json:"image_attachments"`
-		ModelProvider bool   `json:"model_provider"`
-		Host          string `json:"host"`
-		Account       string `json:"account"`
+		Protocol int    `json:"tasks_protocol"`
+		Host     string `json:"host"`
+		Account  string `json:"account"`
 	}
 	if err != nil {
 		r.ErrorCategory = "transport_unavailable"
@@ -118,21 +118,13 @@ func checkRemoteTasks(ctx context.Context, alias, host, account string, r *Resul
 		}
 		return fmt.Errorf("cannot check %s/%s: %s. No task action was sent", host, account, diagnostic.message(err))
 	}
-	if json.Unmarshal(output.data, &cap) != nil || cap.Protocol != 2 {
+	if json.Unmarshal(output.data, &cap) != nil {
 		r.ErrorCategory = "remote_incompatible"
-		return fmt.Errorf("update codex-tasks on %s before using task tools v2. No task action was sent", host)
+		return fmt.Errorf("invalid codex-tasks handshake from %s/%s; no task action was sent", host, account)
 	}
-	if requireLauncher && !cap.Launcher {
+	if cap.Protocol != tasksProtocol {
 		r.ErrorCategory = "remote_incompatible"
-		return fmt.Errorf("update codex-tasks on %s for remote launcher support; no task was created", host)
-	}
-	if requireImages && !cap.Images {
-		r.ErrorCategory = "remote_incompatible"
-		return fmt.Errorf("update codex-tasks on %s for image attachments; no task was submitted", host)
-	}
-	if requireProvider && !cap.ModelProvider {
-		r.ErrorCategory = "remote_incompatible"
-		return fmt.Errorf("update codex-tasks on %s for provider selection; no task was created", host)
+		return fmt.Errorf("codex-tasks protocol mismatch on %s/%s: got %d, require %d; no task action was sent", host, account, cap.Protocol, tasksProtocol)
 	}
 	if cap.Host != host || cap.Account != account {
 		r.ErrorCategory = "destination_mismatch"

@@ -25,11 +25,12 @@ turn status are observations, separate from the command's `outcome`.
 
 Optional empty fields may be omitted. Task metadata uses upstream camelCase;
 codex-tasks result metadata uses snake_case. Clients should tolerate additional fields.
-Private remote requests require protocol 2 and an exact destination account;
+Private remote requests require protocol 3 and an exact destination account;
 the private read-only handshake returns `tasks_protocol`, `host`, `account`, and `build_id`. This is internal, not a new public capability
 command or desktop-control interface.
-Image-capable helpers additionally return `image_attachments: true`. Image
-requests carry an `images` array of absolute receiving-host paths; image bytes
+Protocol versions must match exactly; mismatches fail before any upload or task
+action. Launcher, image, and provider support are part of the protocol, with no
+per-feature negotiation or fallback. Image requests carry an `images` array of absolute receiving-host paths; image bytes
 travel over SFTP before the ordinary request, never in the JSON envelope. The
 internal `_images` staging helper checks the expected host/account before
 allocating or removing a private staging directory. Old helpers are rejected
