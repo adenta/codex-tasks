@@ -1,4 +1,5 @@
 import QtQuick
+import "Inference.js" as Inference
 import QtQuick.Controls as QQC
 import QtCore
 import Quickshell
@@ -30,6 +31,10 @@ Item {
   property string host: settings.host
   property string projectId: ""
   property string inference: ""
+  property string reasoningEffort: ""
+  onInferenceChanged: reasoningEffort=""
+  readonly property var effortOptions: Inference.effortOptions(inferenceModel)
+  onEffortOptionsChanged: { if(!effortOptions.some(function(o){return o.value===reasoningEffort}))reasoningEffort="" }
   property var inferenceModels: []
   property var favorites: []
   property string catalogWarning: ""
@@ -77,7 +82,7 @@ Item {
   function open(payload) {
     if (opened) { root.focusEditor(); return }
     opened=true
-    if (!busy && !recoveryPending) { status=""; uncertain=false;taskId="";clearDraft();projectId="";inference="" }
+    if (!busy && !recoveryPending) { status=""; uncertain=false;taskId="";clearDraft();projectId="";inference="";reasoningEffort="" }
     var name=Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : ""
     targetScreen=Quickshell.screens.find(function(s){return s.name===name}) || Quickshell.screens[0]
     if (!targetsProcess.running) targetsProcess.running=true
@@ -161,6 +166,7 @@ Item {
     images.forEach(function(item){args.push("--image",item.path)})
     if (!background) args.push("--wait-history")
     if(inferenceModel)args.push("--model-provider","openrouter","--model",inferenceModel.id,"--model-context-window",String(inferenceModel.context_length))
+    if(inferenceModel && reasoningEffort)args.push("--reasoning-effort",reasoningEffort)
     if(projectId) {
       var p=selectedProject
       if(!p.roots || !p.roots.length) { status="Project has no working directory.";return }

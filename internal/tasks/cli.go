@@ -44,6 +44,7 @@ Native desktop task tools remain necessary for desktop-only targets and handoff.
 `
 
 type Options struct {
+	ReasoningEffort string        `json:"reasoning_effort,omitempty"`
 	WaitHistory     bool          `json:"wait_history,omitempty"`
 	Target          string        `json:"target,omitempty"`
 	Query           string        `json:"query,omitempty"`
@@ -111,6 +112,7 @@ func parse(args []string, stdin io.Reader) (Options, error) {
 	fs.StringVar(&o.Project, "project", "", "project ID")
 	fs.StringVar(&o.Title, "title", "", "task title")
 	fs.StringVar(&o.Model, "model", "", "model override for new task")
+	fs.StringVar(&o.ReasoningEffort, "reasoning-effort", "", "reasoning effort override for new task; omit for configured default")
 	fs.StringVar(&o.ModelProvider, "model-provider", "", "configured provider for new task")
 	fs.IntVar(&o.ContextWindow, "model-context-window", 0, "context tokens for explicit custom model")
 	fs.StringVar(&o.Mode, "mode", "", "plan or default")
@@ -154,7 +156,7 @@ func parse(args []string, stdin io.Reader) (Options, error) {
 	}
 	allowed := map[string]string{
 		"find": "query archive limit cursor", "projects": "limit cursor", "list": "project archived limit cursor", "read": "turn limit cursor item offset max-chars include-outputs",
-		"create": "cwd project projectless checkout ref title model model-provider model-context-window mode message-file image wait wait-history", "fork": "title mode",
+		"create": "cwd project projectless checkout ref title model model-provider model-context-window reasoning-effort mode message-file image wait wait-history", "fork": "title mode",
 		"message": "message-file image wait", "progress": "turn wait", "mode": "mode", "archive": "", "unarchive": "",
 		"activity": "since task action outcome limit follow",
 	}
@@ -254,6 +256,9 @@ func validate(o Options) error {
 	}
 	if o.ModelProvider != "" && (o.Action != "create" || o.Model == "" || len(o.ModelProvider) > 128 || strings.ContainsAny(o.ModelProvider, " \t\n\r")) {
 		return fmt.Errorf("--model-provider requires create with --model and a provider ID")
+	}
+	if o.ReasoningEffort != "" && (o.Action != "create" || len(o.ReasoningEffort) > 64 || strings.ContainsAny(o.ReasoningEffort, " \t\n\r") || o.ReasoningEffort == "default") {
+		return fmt.Errorf("--reasoning-effort requires create and an advertised effort value; omit for default")
 	}
 	if o.ContextWindow < 0 || (o.ContextWindow != 0 && (o.ModelProvider == "" || o.ContextWindow < 1024)) {
 		return fmt.Errorf("--model-context-window requires an explicit provider and at least 1024 tokens")

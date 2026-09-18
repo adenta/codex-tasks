@@ -3,6 +3,7 @@ package catalog
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -111,7 +112,7 @@ func TestRunCachedAndInvalidArguments(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", dir)
 	path := filepath.Join(dir, "codex-tasks", "openrouter-models.json")
-	if err := writeCache(path, Result{Models: []Model{{ID: "a", Name: "Alpha", ContextLength: 10}}, RefreshedAt: time.Now().UTC()}); err != nil {
+	if err := writeCache(path, Result{MetadataVersion: 1, Models: []Model{{ID: "a", Name: "Alpha", ContextLength: 10}}, RefreshedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
 	var out, stderr bytes.Buffer
@@ -122,5 +123,38 @@ func TestRunCachedAndInvalidArguments(t *testing.T) {
 		if code := Run(args, &out, &stderr); code != 2 {
 			t.Fatalf("invalid args accepted: %v", args)
 		}
+	}
+}
+
+func TestLegacyMetadataRefresh(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		t.Run(fmt.Sprint(fail), func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "models.json")
+			if err := writeCache(path, Result{Models: []Model{{ID: "a", ContextLength: 10}}, RefreshedAt: time.Now()}); err != nil {
+				t.Fatal(err)
+			}
+			calls := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				if fail {
+					http.Error(w, "down", 503)
+					return
+				}
+				w.Write([]byte(`{"data":[{"id":"a","context_length":10,"reasoning":{"supported_efforts":["max","low"]}}]}`))
+			}))
+			defer server.Close()
+			for i := 0; i < 2; i++ {
+				result, err := load(context.Background(), server.Client(), server.URL, path, false)
+				if err != nil || len(result.Models) != 1 {
+					t.Fatalf("lost cache: %+v %v", result, err)
+				}
+				if !fail && (result.Models[0].Reasoning == nil || len(result.Models[0].Reasoning.SupportedEfforts) != 2) {
+					t.Fatal("lost efforts")
+				}
+			}
+			if calls != 1 {
+				t.Fatalf("migration fetched %d times", calls)
+			}
+		})
 	}
 }

@@ -99,3 +99,13 @@ Selecting a model passes its ID, provider, and advertised context size through
 `codex-tasks create`. Both local and remote CLI must support provider selection;
 older helpers are rejected before creation. No automatic provider fallback or
 resubmission occurs. Ordinary subscription tasks and Credits are unchanged.
+
+For OpenRouter models, an **Effort** dropdown appears next to Inference. Target
+and Project become narrower while Inference retains its width. Options are
+Default plus the model's advertised reasoning effort levels. Default preserves
+the destination's configured behavior; it does not force OpenRouter's default.
+Each fresh draft and model change resets effort to Default. Failed or pending
+submissions retain the chosen effort. No preference is saved. Models without
+advertised levels show a disabled selector with an explanatory tooltip.
+Old catalog caches receive one automatic metadata refresh attempt; use Refresh
+to retry after a failure. Both local and remote helpers must use protocol 4.

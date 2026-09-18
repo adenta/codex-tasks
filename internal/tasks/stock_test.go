@@ -176,6 +176,11 @@ args = ["-c", "printf fake-command-key"]
 		o.Model = "openai/gpt-5.6-sol"
 		o.ContextWindow = 32000
 	}
+	expectedEffort := "high"
+	if provider == "openrouter" {
+		o.ReasoningEffort = "low"
+		expectedEffort = "low"
+	}
 	o.Images = []string{testPNG(t, root)}
 	o.WaitHistory = true
 	o.Wait = 10 * time.Second
@@ -272,7 +277,7 @@ args = ["-c", "printf fake-command-key"]
 	if err := s.execute(ctx, message, &second); err != nil {
 		t.Fatalf("cold resume: %v %+v", err, second)
 	}
-	if second.Outcome != "completed" || second.Task.Model != expectedModel || second.Task.ReasoningEffort == nil || *second.Task.ReasoningEffort != "high" {
+	if second.Outcome != "completed" || second.Task.Model != expectedModel || second.Task.ReasoningEffort == nil || *second.Task.ReasoningEffort != expectedEffort {
 		t.Fatalf("cold settings/outcome: %+v", second)
 	}
 	if custom && second.Task.ModelProvider != provider {
@@ -293,10 +298,16 @@ args = ["-c", "printf fake-command-key"]
 	}
 	for i, payload := range captured {
 		var request struct {
-			Model string `json:"model"`
+			Model     string `json:"model"`
+			Reasoning struct {
+				Effort string `json:"effort"`
+			} `json:"reasoning"`
 		}
 		if err := json.Unmarshal([]byte(payload), &request); err != nil || request.Model != expectedModel {
 			t.Fatalf("request %d lost preset/model: %s", i, payload)
+		}
+		if request.Reasoning.Effort != expectedEffort {
+			t.Fatalf("request %d lost reasoning effort: %s", i, payload)
 		}
 		if !strings.Contains(payload, "Plan Mode") {
 			t.Fatalf("request %d lost Plan mode", i)

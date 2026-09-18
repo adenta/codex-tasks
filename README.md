@@ -148,6 +148,11 @@ See [migration and validation notes](docs/migration.md). Extracted from
 
 ## OpenRouter routing
 
+The modal offers model-specific reasoning levels in **Effort**, beside Inference.
+Each fresh draft starts at Default (no override). Direct shell callers can use
+`create --reasoning-effort VALUE`; creation verifies the returned setting before
+sending input. Local and remote CLI copies must both support protocol 4.
+
 New tasks explicitly using `--model-provider openrouter` keep the selected model
 and automatically use the shared OpenRouter preset, for example
 `deepseek/deepseek-v4.1-flash@preset/codex-tasks`. The execution host applies this

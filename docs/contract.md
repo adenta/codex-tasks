@@ -25,7 +25,7 @@ turn status are observations, separate from the command's `outcome`.
 
 Optional empty fields may be omitted. Task metadata uses upstream camelCase;
 codex-tasks result metadata uses snake_case. Clients should tolerate additional fields.
-Private remote requests require protocol 3 and an exact destination account;
+Private remote requests require protocol 4 and an exact destination account;
 the private read-only handshake returns `tasks_protocol`, `host`, `account`, and `build_id`. This is internal, not a new public capability
 command or desktop-control interface.
 Protocol versions must match exactly; mismatches fail before any upload or task

@@ -18,16 +18,22 @@ import (
 const endpoint = "https://openrouter.ai/api/v1/models"
 const maxBytes = 16 << 20
 
+type Reasoning struct {
+	SupportedEfforts []string `json:"supported_efforts"`
+}
+
 type Model struct {
-	ID            string `json:"id"`
-	Name          string `json:"name"`
-	ContextLength int    `json:"context_length"`
+	Reasoning     *Reasoning `json:"reasoning,omitempty"`
+	ID            string     `json:"id"`
+	Name          string     `json:"name"`
+	ContextLength int        `json:"context_length"`
 }
 
 type Result struct {
-	Models      []Model   `json:"models"`
-	RefreshedAt time.Time `json:"refreshed_at"`
-	Warning     string    `json:"warning,omitempty"`
+	MetadataVersion int       `json:"metadata_version"`
+	Models          []Model   `json:"models"`
+	RefreshedAt     time.Time `json:"refreshed_at"`
+	Warning         string    `json:"warning,omitempty"`
 }
 
 func normalize(models []Model) []Model {
@@ -122,19 +128,26 @@ func fetch(ctx context.Context, client *http.Client, url string) (Result, error)
 	if len(result.Models) == 0 {
 		return result, fmt.Errorf("catalog has no usable models")
 	}
+	result.MetadataVersion = 1
 	result.RefreshedAt = time.Now().UTC()
 	return result, nil
 }
 
 func load(ctx context.Context, client *http.Client, url, path string, refresh bool) (Result, error) {
 	cached, cacheErr := readCache(path)
-	if cacheErr == nil && !refresh {
+	if cacheErr == nil && cached.MetadataVersion >= 1 && !refresh {
 		return cached, nil
 	}
 	result, err := fetch(ctx, client, url)
 	if err != nil {
 		if cacheErr == nil {
 			cached.Warning = "Could not refresh models; showing cached models: " + err.Error()
+			if cached.MetadataVersion < 1 {
+				cached.MetadataVersion = 1 // Attempt migration once; explicit refresh retries.
+				if saveErr := writeCache(path, cached); saveErr != nil {
+					cached.Warning += "; could not save migration attempt: " + saveErr.Error()
+				}
+			}
 			return cached, nil
 		}
 		return Result{}, err

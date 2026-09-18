@@ -153,3 +153,69 @@ func TestProviderFlagValidation(t *testing.T) {
 		t.Fatalf("%+v %v", o, err)
 	}
 }
+
+func TestCreationReasoningEffort(t *testing.T) {
+	for _, effort := range []string{"", "low"} {
+		for _, replyEffort := range []string{"", "low", "high"} {
+			t.Run(effort+"/"+replyEffort, func(t *testing.T) {
+				o := opts("create", "")
+				o.CWD = t.TempDir()
+				o.Projectless = true
+				o.ReasoningEffort = effort
+				o.ContextWindow = 32000
+				o.Message = "hello"
+				f := &fakeRPC{handle: func(m string, p map[string]any) (any, error) {
+					if m == "thread/start" {
+						config := p["config"].(map[string]any)
+						if config["model_context_window"] != 32000 {
+							t.Fatal("lost context")
+						}
+						if effort == "" {
+							if _, ok := config["model_reasoning_effort"]; ok {
+								t.Fatal("default override")
+							}
+						} else if config["model_reasoning_effort"] != effort {
+							t.Fatal("lost effort")
+						}
+						task := storedTask()
+						task.ReasoningEffort = nil
+						reply := map[string]any{"thread": task, "model": "configured-model"}
+						if replyEffort != "" {
+							reply["reasoningEffort"] = replyEffort
+						}
+						return reply, nil
+					}
+					if m == "turn/start" {
+						return map[string]any{"turn": Turn{ID: "turn", Status: "completed"}}, nil
+					}
+					return nil, fmt.Errorf("unexpected %s", m)
+				}}
+				s := service{rpc: f, home: t.TempDir()}
+				r := Result{}
+				err := s.create(context.Background(), o, &r)
+				mismatch := effort != "" && effort != replyEffort
+				if mismatch {
+					if err == nil || r.InputAccepted || len(f.methods) != 1 || r.Task == nil {
+						t.Fatalf("unsafe mismatch: %+v %v", r, err)
+					}
+				} else if err != nil || !r.InputAccepted {
+					t.Fatalf("creation failed: %+v %v", r, err)
+				}
+			})
+		}
+	}
+}
+
+func TestReasoningEffortFlag(t *testing.T) {
+	for _, value := range []string{"low", "max", "xhigh", "none"} {
+		o, err := parse([]string{"create", "--projectless", "--reasoning-effort", value}, strings.NewReader(""))
+		if err != nil || o.ReasoningEffort != value {
+			t.Fatalf("%+v %v", o, err)
+		}
+	}
+	for _, args := range [][]string{{"list", "--reasoning-effort", "low"}, {"create", "--projectless", "--reasoning-effort", "bad value"}, {"create", "--projectless", "--reasoning-effort", "default"}} {
+		if _, err := parse(args, strings.NewReader("")); err == nil {
+			t.Fatalf("accepted %v", args)
+		}
+	}
+}

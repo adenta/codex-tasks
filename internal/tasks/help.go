@@ -47,7 +47,7 @@ continuation_cursor, --item and next_offset; retain task/turn/output filters.
 Example: codex-tasks read TASK_UUID --limit 20 --host server`,
 	"create": `create [--cwd DIRECTORY] [--project ID | --projectless]
        [--checkout | --ref REF] [--title TITLE] [--model MODEL] [--model-provider PROVIDER]
-       [--model-context-window TOKENS]
+       [--model-context-window TOKENS] [--reasoning-effort VALUE]
        [--mode plan|default] [--message-file FILE|-] [--image FILE ...] [--wait DURATION]
 Create a task only within the user's requested scope. CWD must be absolute on
 the target. Match or create project assignment; ambiguous roots require --project.
@@ -56,6 +56,8 @@ fetch. --ref selects a requested ref; --checkout uses the existing checkout.
 Confirmed non-Git directories are used directly. --projectless omits assignment.
 Omitted model/provider/mode preserve server defaults. Provider selection requires
 --model and an already-configured provider on the execution host. Optional
+--reasoning-effort selects an advertised effort for the new task. Omit it to keep
+the configured default. The returned setting is verified before sending input.
 --model-context-window supplies the custom model context limit. No credentials
 are handled and no provider is configured by this CLI. Optional first message starts work.
 Explicit OpenRouter models use MODEL@preset/codex-tasks, applied on the execution

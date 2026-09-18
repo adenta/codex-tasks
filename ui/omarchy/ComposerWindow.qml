@@ -54,12 +54,7 @@ import qs.Ui
             onClicked:root.dismiss()
           }
         }
-        Row {
-          width:parent.width;spacing:Style.space(12);enabled:!root.busy && !root.uncertain
-          Dropdown { width:(parent.width-2*parent.spacing)*0.23;label:"Target";value:root.host;options:root.servers;onChanged:function(value){root.changeHost(value)} }
-          SearchableDropdown { width:(parent.width-2*parent.spacing)*0.37;label:root.refreshing ? "Project · refreshing…" : "Project";value:root.projectId;options:root.projectOptions;onChanged:function(value){root.projectId=value;root.status=""} }
-          InferenceDropdown { width:(parent.width-2*parent.spacing)*0.40;value:root.inference;models:root.inferenceModels;favorites:root.favorites;refreshing:root.catalogRefreshing;refreshedAt:root.catalogRefreshedAt;warning:root.catalogWarning;onChanged:function(value){root.inference=value;root.status=""};onFavoriteToggled:function(value){root.toggleFavorite(value)};onRefreshRequested:root.refreshCatalog(true) }
-        }
+        InferenceRow { width:parent.width;root:panel.root }
         Dropdown {
           width:parent.width;visible:root.selectedProject!==null && root.selectedProject.isGitRepository!==false
           label:"Run in";value:root.mode;options:[{value:"worktree",label:"New worktree"},{value:"checkout",label:"Existing checkout"}]

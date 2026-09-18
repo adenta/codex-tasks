@@ -9,4 +9,13 @@ function rows(models, favorites, query) {
   rest.forEach(function(m,i){result.push({id:m.id,name:m.name,unavailable:false,favorite:false,heading:i===0?"All models":""})})
   return result
 }
-if (typeof module !== "undefined") module.exports={rows:rows}
+function effortOptions(model) {
+  var result=[{value:"",label:"Default"}], seen={}
+  var efforts=model && model.reasoning && model.reasoning.supported_efforts
+  if(Array.isArray(efforts))efforts.forEach(function(e){
+    if(typeof e!=="string" || !e || e.length>64 || /\s/.test(e) || e==="default" || seen[e])return
+    seen[e]=true;result.push({value:e,label:e.charAt(0).toUpperCase()+e.slice(1)})
+  })
+  return result
+}
+if (typeof module !== "undefined") module.exports={rows:rows,effortOptions:effortOptions}

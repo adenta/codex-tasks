@@ -211,8 +211,15 @@ func (s *service) create(ctx context.Context, o Options, r *Result) error {
 		params["modelProvider"] = o.ModelProvider
 		params["serviceTier"] = "default"
 	}
+	config := map[string]any{}
 	if o.ContextWindow > 0 {
-		params["config"] = map[string]any{"model_context_window": o.ContextWindow}
+		config["model_context_window"] = o.ContextWindow
+	}
+	if o.ReasoningEffort != "" {
+		config["model_reasoning_effort"] = o.ReasoningEffort
+	}
+	if len(config) > 0 {
+		params["config"] = config
 	}
 	var reply struct {
 		Thread   Task    `json:"thread"`
@@ -250,6 +257,9 @@ func (s *service) create(ctx context.Context, o Options, r *Result) error {
 	}
 	if r.Task.ReasoningEffort == nil {
 		r.Task.ReasoningEffort = reply.Effort
+	}
+	if o.ReasoningEffort != "" && (r.Task.ReasoningEffort == nil || *r.Task.ReasoningEffort != o.ReasoningEffort) {
+		return fmt.Errorf("new task did not retain requested reasoning effort; no message sent")
 	}
 	if o.Projectless && r.Task.ProjectID != "" {
 		return fmt.Errorf("new task unexpectedly has a project assignment")
