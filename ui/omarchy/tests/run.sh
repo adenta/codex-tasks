@@ -2,7 +2,7 @@
 set -eu
 src=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 test_root=$(mktemp -d /tmp/codex-launcher-test.XXXXXX)
-trap 'result=$?; if [ "$result" -ne 0 ]; then cat "$test_root"/*log; fi; rm -rf "$test_root"' EXIT
+trap 'rm -rf "$test_root"' EXIT
 ln -s /usr/share/omarchy/shell/Commons "$test_root/Commons"
 ln -s /usr/share/omarchy/shell/Ui "$test_root/Ui"
 ln -s "$src" "$test_root/Launcher"

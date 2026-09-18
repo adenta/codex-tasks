@@ -90,33 +90,6 @@ Failure preserves cached models and subscription access. Catalog requests time
 out after 15 seconds and do not handle credentials or route inference.
 
 The destination account must already have a configured `openrouter` provider.
-Explicit model-to-provider mappings can be added to the existing
-`~/.config/codex-tasks/launcher.ini` on the desktop (XPS uses
-`/home/andre/.config/codex-tasks/launcher.ini`):
-
-```ini
-[General]
-modelProviders="{\"deepseek/deepseek-v4.1-flash\":\"openrouter_together\"}"
-```
-
-Merge this key into the existing `[General]` section. Keys are exact model IDs;
-values are Codex provider IDs already configured on the destination account.
-The mapping applies to every target host. Unmapped models use `openrouter`;
-Subscription is unchanged. Missing settings or `{}` mean no overrides.
-The launcher reloads mappings when opened and preserves them when saving other
-settings. Invalid JSON, non-object mappings, or empty/whitespace-containing IDs
-produce a visible error and block model launches until corrected; Subscription
-remains available. Provider IDs are limited to 128 characters.
-
-Mapped models show a monochrome `↗` to the right of the favorite star, with
-`Configured provider: <id>` in its tooltip and the model row's tooltip. This
-indicates the configured route, not verified upstream enforcement. For example,
-the name `openrouter_together` alone does not restrict OpenRouter to Together:
-configure that enforcement separately before adding the live mapping. Missing
-or rejected destination providers fail without retrying through the default.
-Changes apply to new launches, not existing tasks. Remove a mapping to restore
-default routing for subsequent launches.
-
 Selecting a model passes its ID, provider, and advertised context size through
 `codex-tasks create`. Both local and remote CLI must support provider selection;
 older helpers are rejected before creation. No automatic provider fallback or
