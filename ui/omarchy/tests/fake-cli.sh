@@ -14,6 +14,9 @@ case "$1" in
     prompt=$(cat)
     sleep 0.2
     case "$prompt" in
+      routed)
+        case " $* " in *' --model-provider openrouter_together --model fixture/model --model-context-window 32000 '*) ;; *) exit 9;; esac
+        printf '%s\n' '{"input_accepted":true,"task":{"id":"routed-id"}}' ;;
       images)
         case " $* " in *' --image /tmp/fixture.png '*) ;; *) exit 9;; esac
         case " $* " in *' --model-provider openrouter --model fixture/model --model-context-window 32000 '*) ;; *) exit 9;; esac

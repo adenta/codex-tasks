@@ -4,6 +4,7 @@ import QtCore
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
+import "Inference.js" as Inference
 import Quickshell.Hyprland
 import qs.Commons
 import qs.Ui
@@ -33,6 +34,8 @@ Item {
   property string inference: ""
   property var inferenceModels: []
   property var favorites: []
+  property var modelProviders: ({})
+  property string modelProvidersError: ""
   property string catalogWarning: ""
   property string catalogRefreshedAt: ""
   property string catalogCLI: Quickshell.env("HOME") + "/.local/bin/codex-openrouter"
@@ -54,7 +57,7 @@ Item {
   }
   readonly property var selectedProject: projects.find(function(p) { return p.id === root.projectId }) || null
   readonly property bool validServer: servers.some(function(s) { return s.value === root.host })
-  readonly property bool canSend: !busy && !pasting && !uncertain && validServer && (!inference || inferenceModel!==null) && (message.trim().length > 0 || images.length > 0) && (projectId === "" || (selectedProject !== null && !selectedProject.unavailable))
+  readonly property bool canSend: !busy && !pasting && !uncertain && validServer && (!inference || (inferenceModel!==null && !modelProvidersError)) && (message.trim().length > 0 || images.length > 0) && (projectId === "" || (selectedProject !== null && !selectedProject.unavailable))
   readonly property var projectOptions: {
     var list = [{value:"", label:"No project"}]
     projects.forEach(function(p) { list.push({value:p.id,label:(p.name || p.id) + (p.unavailable ? " (unavailable)" : "")}) })
@@ -80,7 +83,18 @@ Item {
     var m=Object.assign({},projectMemory);m[host]=projectId;projectMemory=m
     settings.projects=JSON.stringify(m)
   }
+  function loadModelProviders() {
+    settings.sync()
+    try {
+      modelProviders=Inference.parseModelProviders(settings.value("modelProviders", "{}"))
+      modelProvidersError=""
+    } catch(e) {
+      modelProviders={}
+      modelProvidersError="Invalid modelProviders in launcher.ini: "+e.message
+    }
+  }
   function open(payload) {
+    loadModelProviders()
     if (opened) { root.focusEditor(); return }
     opened=true
     if (!busy && !recoveryPending) { status=""; uncertain=false;taskId="";clearDraft();inference="" }
@@ -158,7 +172,7 @@ Item {
     var args=[cli,"create","--host",host,"--message-file","-","--json"]
     images.forEach(function(item){args.push("--image",item.path)})
     if (!background) args.push("--wait-history")
-    if(inferenceModel)args.push("--model-provider","openrouter","--model",inferenceModel.id,"--model-context-window",String(inferenceModel.context_length))
+    if(inferenceModel)args.push("--model-provider",Inference.providerFor(modelProviders,inferenceModel.id),"--model",inferenceModel.id,"--model-context-window",String(inferenceModel.context_length))
     if(projectId) {
       var p=selectedProject
       if(!p.roots || !p.roots.length) { status="Project has no working directory.";return }

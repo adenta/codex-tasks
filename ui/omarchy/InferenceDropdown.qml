@@ -9,6 +9,7 @@ Item {
   property string value: ""
   property var models: []
   property var favorites: []
+  property var modelProviders: ({})
   property bool refreshing: false
   property string refreshedAt: ""
   property string warning: ""
@@ -88,15 +89,21 @@ Item {
             delegate:Column {
               required property var modelData
               required property int index
+              readonly property string configuredProvider: Inference.mappedProvider(control.modelProviders,modelData.id)
+              readonly property string routingDescription: configuredProvider ? "Configured provider: "+configuredProvider : ""
               width:results.width
               Text { visible:modelData.heading!=="";text:modelData.heading;topPadding:Style.space(6);bottomPadding:Style.space(4);leftPadding:Style.space(8);color:Qt.alpha(Color.popups.text,0.65);font.family:Style.font.family;font.pixelSize:Style.font.caption }
               Row {
                 width:parent.width
                 Button {
                   id:modelButton
-                  width:parent.width-star.width;height:Style.space(34)
+                  width:parent.width-star.width-routeSlot.width;height:Style.space(34)
                   foreground:Color.popups.text;background:results.currentIndex===index?Qt.alpha(Color.accent,0.15):"transparent"
-                  leftAlign:true;enabled:!modelData.unavailable;tooltipText:modelData.name+"\n"+modelData.id;focusable:true
+                  leftAlign:true;enabled:!modelData.unavailable;tooltipText:modelData.name+"\n"+modelData.id+(routingDescription?"\n"+routingDescription:"");focusable:true
+                  Accessible.name: modelData.name
+                  Accessible.description: routingDescription
+                  QQC.ToolTip.visible: routingDescription!=="" && (activeFocus || (results.activeFocus && results.currentIndex===index))
+                  QQC.ToolTip.text: tooltipText
                   Text {
                     objectName:"inferenceModelLabel"
                     anchors.left:parent.left;anchors.right:parent.right;anchors.verticalCenter:parent.verticalCenter
@@ -107,7 +114,21 @@ Item {
                   }
                   onClicked:control.choose(modelData.id)
                 }
-                Button { id:star;width:Style.space(34);height:width;text:modelData.favorite?"★":"☆";foreground:modelData.favorite?Color.accent:Color.popups.text;focusable:true;tooltipText:modelData.favorite?"Remove favorite":"Add favorite";onClicked:control.favoriteToggled(modelData.id) }
+                Button { id:star;objectName:"inferenceStar_"+modelData.id;width:Style.space(34);height:width;text:modelData.favorite?"★":"☆";foreground:modelData.favorite?Color.accent:Color.popups.text;focusable:true;tooltipText:modelData.favorite?"Remove favorite":"Add favorite";onClicked:control.favoriteToggled(modelData.id) }
+                Item {
+                  id:routeSlot;width:Style.space(22);height:star.height
+                  HoverHandler { id:routeHover;enabled:configuredProvider!=="" }
+                  Text {
+                    objectName:"inferenceRoute_"+modelData.id
+                    anchors.centerIn:parent;visible:configuredProvider!==""
+                    text:"↗";color:Color.popups.text;font.family:Style.font.family;font.pixelSize:Style.font.body
+                    Accessible.role:Accessible.StaticText
+                    Accessible.name:routingDescription
+                    Accessible.description:routingDescription
+                    QQC.ToolTip.visible:routeHover.hovered
+                    QQC.ToolTip.text:routingDescription
+                  }
+                }
               }
             }
           }
