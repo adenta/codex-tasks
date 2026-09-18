@@ -35,7 +35,7 @@ import qs.Ui
         Row {
           width:parent.width
           Text { width:parent.width-Style.space(34);text:"New remote task";color:Color.popups.text;font.family:Style.font.family;font.pixelSize:Style.space(20);font.bold:true;anchors.verticalCenter:parent.verticalCenter }
-          Button { text:"×";fontSize:Style.space(20);width:Style.space(34);height:width;bordered:true;focusable:true;tooltipText:"Close (Esc)";enabled:!root.busy;onClicked:root.dismiss() }
+          Button { text:"×";fontSize:Style.space(20);width:Style.space(34);height:width;bordered:true;focusable:true;tooltipText:"Close (Esc)";enabled:!root.busy || root.backgroundSending;onClicked:root.dismiss() }
         }
         Row {
           width:parent.width;spacing:Style.space(12);enabled:!root.busy && !root.uncertain
@@ -64,7 +64,7 @@ import qs.Ui
               background:null
               Keys.onPressed:function(event){
                 if(event.key===Qt.Key_Escape){root.dismiss();event.accepted=true}
-                else if((event.key===Qt.Key_Return || event.key===Qt.Key_Enter) && !(event.modifiers & Qt.ShiftModifier) && !inputMethodComposing){root.send();event.accepted=true}
+                else if((event.key===Qt.Key_Return || event.key===Qt.Key_Enter) && !(event.modifiers & Qt.ShiftModifier) && !inputMethodComposing){root.send(!!(event.modifiers & Qt.ControlModifier));event.accepted=true}
               }
             }
           }
@@ -74,19 +74,25 @@ import qs.Ui
           QQC.BusyIndicator { width:Style.space(24);height:width;running:root.busy;visible:running }
           Text { width:parent.width-(root.busy ? Style.space(34):0);text:root.status;color:Color.popups.text;font.family:Style.font.family;font.pixelSize:Style.space(13);wrapMode:Text.Wrap }
         }
-        Row {
+        Text { width:parent.width;text:"Enter to send & open · Ctrl+Enter to send in background\nShift+Enter for a new line";color:Qt.alpha(Color.popups.text,0.6);font.family:Style.font.family;font.pixelSize:Style.space(12);wrapMode:Text.Wrap }
+        Flow {
           width:parent.width;spacing:Style.space(10)
-          Text { width:parent.width-sendButton.width-parent.spacing-(openButton.visible?openButton.width+parent.spacing:0);text:"Enter to send · Shift+Enter for a new line";color:Qt.alpha(Color.popups.text,0.6);font.family:Style.font.family;font.pixelSize:Style.space(12);wrapMode:Text.Wrap;anchors.verticalCenter:parent.verticalCenter }
+          Button {
+            text:"Send in background";height:Style.space(40)
+            bordered:true;focusable:true;enabled:root.canSend
+            tooltipText:"Ctrl+Enter · Close immediately without opening Codex"
+            onClicked:root.send(true)
+          }
           Button { id:openButton;visible:root.taskId!=="";text:"Open task";bordered:true;focusable:true;enabled:!root.busy;onClicked:root.openTask() }
           Button {
             id:sendButton
-            text:root.busy?"Sending…":"Send"
-            width:Style.space(100);height:Style.space(40)
+            text:root.busy?"Sending…":"Send & open"
+            width:Style.space(150);height:Style.space(40)
             bordered:true;focusable:true
             foreground:Color.accent
             background:Qt.alpha(Color.accent,enabled?0.18:0.08)
             opacity:enabled?1:0.55
-            enabled:root.canSend;onClicked:root.send()
+            enabled:root.canSend;onClicked:root.send(false)
           }
         }
       }

@@ -19,7 +19,9 @@ Check existing bindings before replacing one. Reload Hyprland and check errors.
 The plugin can also be opened with that shell command. Uses the CLI installed at
 `~/.local/bin/codex-tasks` and remote hosts in its normal configuration.
 
-Enter sends; Shift+Enter adds a newline; Escape closes and discards the prompt.
+Enter sends and opens Codex; Ctrl+Enter sends in the background and closes the
+modal immediately without opening Codex. Both actions have separate buttons.
+Shift+Enter adds a newline; Escape closes and discards an idle prompt.
 The server, project per server, Git execution choice, and cached project lists
 are stored in `~/.config/codex-tasks/launcher.ini`. Prompt text is never stored.
 Grace/no project is the first-run selection. A missing server requires explicit
@@ -27,10 +29,18 @@ selection; destinations are never silently substituted.
 
 Opening uses cached project choices with a background refresh. A host change
 loads that host's cache and refreshes it. No typing-triggered requests or polling.
-Creation sends once and waits up to ten seconds for readable user-message history
+Send & open sends once and waits up to ten seconds for readable user-message history
 before requesting that Codex open the returned task UUID. URL dispatch does not
 prove that the desktop loaded it. An uncertain result must be inspected before
 another send; Open task never resends the prompt.
+
+Background sending skips the history wait and notifies when input is accepted,
+with an optional Open task action. This confirms delivery, not task completion.
+Failed or uncertain delivery retains the prompt in memory until you reopen the
+launcher and explicitly close it or successfully retry a confirmed failure.
+Uncertain submissions cannot be resent. Reopening during delivery shows the
+existing submission; only one submission can be pending at a time. Shell restart
+or plugin reload clears in-memory state.
 
 Remove the binding and plugin entry, then the plugin directory, to uninstall the
 popup. The CLI and skill remain independent. Remove launcher.ini to reset choices.

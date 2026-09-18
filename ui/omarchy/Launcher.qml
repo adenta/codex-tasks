@@ -15,6 +15,8 @@ Item {
   property bool opened: false
   property bool busy: false
   property bool uncertain: false
+  property bool recoveryPending: false
+  readonly property bool backgroundSending: busy && createProcess.background
   property string status: ""
   property string taskId: ""
   property string message: ""
@@ -26,7 +28,7 @@ Item {
   property string projectId: ""
   property string mode: settings.mode
   property var targetScreen: null
-  readonly property string cli: Quickshell.env("HOME") + "/.local/bin/codex-tasks"
+  property string cli: Quickshell.env("HOME") + "/.local/bin/codex-tasks"
   readonly property var projects: {
     var list=(cache[host] || []).slice()
     desktopProjects.filter(function(p){return p.host===root.host}).forEach(function(p){
@@ -66,16 +68,20 @@ Item {
   }
   function open(payload) {
     if (opened) { root.focusEditor(); return }
-    opened=true; status=""; uncertain=false;taskId="";message=""
+    opened=true
+    if (!busy && !recoveryPending) { status=""; uncertain=false;taskId="";message="" }
     var name=Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : ""
     targetScreen=Quickshell.screens.find(function(s){return s.name===name}) || Quickshell.screens[0]
     if (!targetsProcess.running) targetsProcess.running=true
     refresh()
     Qt.callLater(function(){root.focusEditor()})
   }
-  function close() { if (!busy) { opened=false; message="" } }
+  function close() {
+    opened=false
+    if (!busy) { message=""; recoveryPending=false }
+  }
   function dismiss() {
-    if (busy) return
+    if (busy && !createProcess.background) return
     close()
     if(shell && typeof shell.hide === "function") shell.hide("adenta.codex-tasks")
   }
@@ -90,9 +96,10 @@ Item {
     projectProcess.command=[cli,"projects","--host",host,"--limit","100","--json"]
     projectProcess.running=true
   }
-  function send() {
+  function send(background) {
     if (!canSend) return
-    var args=[cli,"create","--host",host,"--wait-history","--message-file","-","--json"]
+    var args=[cli,"create","--host",host,"--message-file","-","--json"]
+    if (!background) args.push("--wait-history")
     if(projectId) {
       var p=selectedProject
       if(!p.roots || !p.roots.length) { status="Project has no working directory.";return }
@@ -101,14 +108,38 @@ Item {
       else if(!p.desktopFolder)args.push("--project",p.id)
       if(mode==="checkout")args.push("--checkout")
     } else args.push("--projectless")
+    createProcess.background=!!background;recoveryPending=false
     remember();busy=true;status="Creating task on " + host + "…";taskId=""
     createProcess.command=args;createProcess.prompt=message;createProcess.stdinEnabled=true;createProcess.running=true
+    if (background) {
+      opened=false
+      if(shell && typeof shell.hide === "function") shell.hide("adenta.codex-tasks")
+    }
   }
   function openTask() {
     if(!taskId)return
     status="Opening in Codex…"
     if(Qt.openUrlExternally("codex://threads/"+encodeURIComponent(taskId))) { busy=false;dismiss() }
     else { busy=false;status="Task created, but opening Codex failed. Try Open task." }
+  }
+  function notifyDelivery(success, id) {
+    var args=["notify-send","--app-name=Codex Tasks","--expire-time=8000"]
+    if (success) args.push("--action=open=Open task", "Task sent", "Codex accepted your task on " + host + ".")
+    else args.push("--urgency=critical", "Task delivery needs attention", "Reopen the task launcher to review the result. Your prompt is retained; nothing will be resent automatically.")
+    var notification=notificationComponent.createObject(root, {command:args, deliveredTaskId:id})
+    notification.running=true
+  }
+  Component {
+    id: notificationComponent
+    Process {
+      property string deliveredTaskId: ""
+      stdout: StdioCollector { id: actionOutput }
+      onExited: {
+        if(actionOutput.text.trim()==="open" && deliveredTaskId)
+          Qt.openUrlExternally("codex://threads/"+encodeURIComponent(deliveredTaskId))
+        destroy()
+      }
+    }
   }
   Process {
     id: targetsProcess
@@ -153,6 +184,7 @@ Item {
   Process {
     id: createProcess
     property string prompt: ""
+    property bool background: false
     onStarted: { write(prompt);prompt="";stdinEnabled=false }
     stdout: StdioCollector { id: createOutput }
     stderr: StdioCollector { id: createError }
@@ -161,11 +193,18 @@ Item {
       try {
         var data=JSON.parse(createOutput.text)
         root.taskId=data.task ? data.task.id || "" : ""
-        if(code===0 && data.input_accepted && data.history_ready && root.taskId) {root.openTask();return}
+        if(code===0 && data.input_accepted && (background || data.history_ready) && root.taskId) {
+          if(background) {
+            root.message="";root.status="Task sent to " + root.host + "."
+            root.notifyDelivery(true, root.taskId)
+          } else root.openTask()
+          return
+        }
         root.uncertain=!!root.taskId || data.outcome==="unknown" || !!data.input_accepted
         root.status=data.error || "Creation could not be confirmed. Inspect tasks before sending again."
         if(root.taskId)root.status+=" Task: "+root.taskId
       }catch(e){root.uncertain=true;root.status="Could not confirm delivery. Check tasks on " + root.host + " before sending again. " + String(createError.text || e)}
+      if(background) { root.recoveryPending=true;root.notifyDelivery(false, root.taskId) }
     }
   }
   property bool windowEnabled: true
