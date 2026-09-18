@@ -118,6 +118,14 @@ Item {
     clipboardProcess.command=[cli,"_clipboard-image"]
     clipboardProcess.running=true
   }
+  function attachImage(url) {
+    if(busy || uncertain || pasting)return
+    if(images.length>=8){status="You can attach up to 8 images.";return}
+    pasting=true
+    clipboardProcess.generation=draftGeneration
+    clipboardProcess.command=[cli,"_import-image",String(url)]
+    clipboardProcess.running=true
+  }
   function changeHost(value) {
     host=value;projectId=projectMemory[host] || "";remember();status="";refresh()
   }

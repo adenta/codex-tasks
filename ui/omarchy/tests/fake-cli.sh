@@ -2,7 +2,7 @@
 set -eu
 case "$1" in
   models) printf '%s\n' '{"models":[{"id":"test/model","name":"Test model","context_length":32000}],"refreshed_at":"2026-09-18T00:00:00Z"}' ;;
-  _clipboard-image)
+  _clipboard-image|_import-image)
     sleep 0.1
     case "$0" in
       *text-clipboard) printf '%s\n' '{"image":false}' ;;

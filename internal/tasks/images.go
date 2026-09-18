@@ -273,6 +273,63 @@ func uploadImages(ctx context.Context, alias, dir string, paths []string) ([]str
 
 // Clipboard helpers belong to the optional Wayland launcher. Ordinary CLI image
 // input never depends on wl-paste, Quickshell, or the desktop session.
+func localImagePath(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) >= 2 && ((value[0] == '"' && value[len(value)-1] == '"') || (value[0] == '\'' && value[len(value)-1] == '\'')) {
+		value = value[1 : len(value)-1]
+	}
+	if strings.HasPrefix(value, "file:") {
+		u, err := url.Parse(value)
+		if err != nil || u.Scheme != "file" || (u.Host != "" && u.Host != "localhost") || u.RawQuery != "" || u.Fragment != "" {
+			return ""
+		}
+		value = u.Path
+	}
+	if strings.HasPrefix(value, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return ""
+		}
+		value = filepath.Join(home, value[2:])
+	}
+	if !filepath.IsAbs(value) || strings.ContainsAny(value, "\x00\r\n") {
+		return ""
+	}
+	return value
+}
+
+// Import a private copy so removing a draft never removes the selected file.
+func importImage(p endpoints.Config, value string, stdout io.Writer) error {
+	source := localImagePath(value)
+	if source == "" {
+		return fmt.Errorf("select a local image file")
+	}
+	_, ext, err := imageInfo(source)
+	if err != nil {
+		return err
+	}
+	dir, err := newImageDir(p, "draft-")
+	if err != nil {
+		return err
+	}
+	ok := false
+	defer func() {
+		if !ok {
+			_ = os.RemoveAll(dir)
+		}
+	}()
+	path := filepath.Join(dir, "image"+ext)
+	if err = copyImage(source, path); err != nil {
+		return err
+	}
+	if _, _, err = imageInfo(path); err != nil {
+		return err
+	}
+	err = json.NewEncoder(stdout).Encode(map[string]any{"image": true, "path": path, "url": (&url.URL{Scheme: "file", Path: path}).String()})
+	ok = err == nil
+	return err
+}
+
 func clipboardImage(ctx context.Context, p endpoints.Config, stdout io.Writer) error {
 	types := exec.CommandContext(ctx, "wl-paste", "--list-types")
 	var available limitedBuffer
@@ -297,6 +354,23 @@ func clipboardImage(ctx context.Context, p endpoints.Config, stdout io.Writer) e
 			if strings.HasPrefix(line, "image/") {
 				return fmt.Errorf("clipboard images must be PNG or JPEG")
 			}
+		}
+		for _, candidate := range []string{"text/uri-list", "text/plain;charset=utf-8", "text/plain", "UTF8_STRING"} {
+			if !strings.Contains("\n"+string(available.data)+"\n", "\n"+candidate+"\n") {
+				continue
+			}
+			cmd := exec.CommandContext(ctx, "wl-paste", "--no-newline", "--type", candidate)
+			var content limitedBuffer
+			cmd.Stdout = &content
+			if err := cmd.Run(); err != nil {
+				return fmt.Errorf("could not read clipboard text")
+			}
+			path := localImagePath(string(content.data))
+			ext := strings.ToLower(filepath.Ext(path))
+			if path != "" && (ext == ".png" || ext == ".jpg" || ext == ".jpeg") {
+				return importImage(p, path, stdout)
+			}
+			break
 		}
 		return json.NewEncoder(stdout).Encode(map[string]any{"image": false})
 	}

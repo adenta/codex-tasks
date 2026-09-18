@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls as QQC
+import QtQuick.Dialogs
 import QtCore
 import Quickshell
 import Quickshell.Io
@@ -13,13 +14,22 @@ import qs.Ui
     function focusEditor() { editor.forceActiveFocus() }
     id: panel
     visible: root.opened
+    FileDialog {
+      id:imagePicker
+      title:"Attach image"
+      fileMode:FileDialog.OpenFile
+      nameFilters:["Images (*.png *.jpg *.jpeg)"]
+      onAccepted:{root.attachImage(selectedFile);Qt.callLater(panel.focusEditor)}
+      onRejected:Qt.callLater(panel.focusEditor)
+    }
     screen: root.targetScreen
     anchors { top:true;bottom:true;left:true;right:true }
     color:"transparent"
     exclusionMode: ExclusionMode.Ignore
     WlrLayershell.namespace: "codex-tasks-launcher"
-    WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.keyboardFocus: visible ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
+    // Let the ordinary desktop file dialog receive input above this layer surface.
+    WlrLayershell.layer: imagePicker.visible ? WlrLayer.Bottom : WlrLayer.Overlay
+    WlrLayershell.keyboardFocus: visible && !imagePicker.visible ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
     Rectangle { anchors.fill:parent;color:Color.menu.scrim }
     MouseArea { anchors.fill:parent;onClicked:root.dismiss() }
     BorderSurface {
@@ -78,6 +88,11 @@ import qs.Ui
               }
             }
           }
+        }
+        Button {
+          text:"Attach image…";bordered:true;focusable:true
+          enabled:!root.busy && !root.uncertain && !root.pasting && root.images.length<8
+          onClicked:imagePicker.open()
         }
         Flow {
           width:parent.width;spacing:Style.space(8);visible:root.images.length>0

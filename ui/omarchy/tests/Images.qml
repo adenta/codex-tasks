@@ -68,6 +68,12 @@ ShellRoot {
         break
       case 8:
         check(textPastes===1 && !app.images.length,"text clipboard did not use normal paste")
+        app.cli=Quickshell.env("LAUNCHER_TEST_CLI")
+        app.attachImage("file:///tmp/selected.png")
+        check(app.pasting && !app.canSend,"send allowed during file import")
+        break
+      case 9:
+        check(app.images.length===1 && app.canSend,"selected image not attached")
         app.dismiss()
         console.log("IMAGE_FIXTURE_PASS");Qt.quit()
       }

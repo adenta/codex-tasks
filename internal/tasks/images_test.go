@@ -424,3 +424,64 @@ func TestImageStagingIdentityAndBounds(t *testing.T) {
 		t.Fatal("aggregate image bound failed")
 	}
 }
+
+func TestImportAndPasteImagePaths(t *testing.T) {
+	dir := t.TempDir()
+	source := testPNG(t, dir)
+	spaced := filepath.Join(dir, "image with spaces.png")
+	data, _ := os.ReadFile(source)
+	if err := os.WriteFile(spaced, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	p := endpoints.Config{CodexHome: t.TempDir()}
+	bin := t.TempDir()
+	script := "#!/bin/sh\nif [ \"$1\" = --list-types ]; then printf 'text/plain\\n'; else printf '%s' \"$TASKS_CLIPBOARD_TEXT\"; fi\n"
+	if err := os.WriteFile(filepath.Join(bin, "wl-paste"), []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+	for _, value := range []string{source, "\"" + spaced + "\"", "file://" + strings.ReplaceAll(spaced, " ", "%20")} {
+		t.Setenv("TASKS_CLIPBOARD_TEXT", value)
+		var out bytes.Buffer
+		if err := clipboardImage(context.Background(), p, &out); err != nil {
+			t.Fatal(err)
+		}
+		var result struct {
+			Image bool
+			Path  string
+		}
+		if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		if !result.Image || result.Path == source || result.Path == spaced {
+			t.Fatalf("not a private attachment: %+v", result)
+		}
+		got, err := os.ReadFile(result.Path)
+		if err != nil || !bytes.Equal(got, data) {
+			t.Fatal("import changed image")
+		}
+		if err := discardDrafts(p, []string{result.Path}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Stat(spaced); err != nil {
+			t.Fatal("source removed", err)
+		}
+	}
+	for _, value := range []string{"file://otherhost/tmp/a.png", "relative.png", "/tmp/a.png\n/tmp/b.png"} {
+		if localImagePath(value) != "" {
+			t.Fatalf("accepted %q", value)
+		}
+	}
+	invalid := filepath.Join(dir, "invalid.png")
+	if err := os.WriteFile(invalid, []byte("not an image"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var out, diagnostic bytes.Buffer
+	if code := Run(p, []string{"_import-image", invalid}, strings.NewReader(""), &out, &diagnostic); code != 1 {
+		t.Fatal("invalid image accepted")
+	}
+	out.Reset()
+	if code := Run(p, []string{"_import-image", spaced}, strings.NewReader(""), &out, &diagnostic); code != 0 {
+		t.Fatal(diagnostic.String())
+	}
+}

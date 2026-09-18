@@ -34,7 +34,7 @@ per-feature negotiation or fallback. Image requests carry an `images` array of a
 travel over SFTP before the ordinary request, never in the JSON envelope. The
 internal `_images` staging helper checks the expected host/account before
 allocating or removing a private staging directory. Old helpers are rejected
-before uploads or task submission. `_clipboard-image` and `_discard-images` are
+before uploads or task submission. `_clipboard-image`, `_import-image`, and `_discard-images` are
 local launcher helpers; they do not modify tasks or require a running server.
 
 Find coverage statuses are `complete`, `more`, and `unavailable`. `found` does not imply complete coverage. `ambiguous`

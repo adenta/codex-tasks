@@ -332,6 +332,13 @@ func Run(paths endpoints.Config, args []string, stdin io.Reader, stdout, stderr 
 		}
 		return 0
 	}
+	if args[0] == "_import-image" && len(args) == 2 {
+		if err := importImage(paths, args[1], stdout); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		return 0
+	}
 	if args[0] == "_discard-images" {
 		if err := discardDrafts(paths, args[1:]); err != nil {
 			fmt.Fprintln(stderr, err)

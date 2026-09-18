@@ -26,6 +26,9 @@ Enter sends and opens Codex; Alt+Enter sends in the background and closes the
 modal immediately without opening Codex. Both actions have separate buttons.
 Shift+Enter adds a newline; Escape closes and discards an idle prompt.
 Ctrl+V pastes text or PNG/JPEG images using the existing `wl-paste` executable.
+It also attaches a single pasted absolute image path, quoted path, `~/` path, or
+local `file://` URL. Use **Attach image…** to browse for a PNG or JPEG on this
+computer. Selected files are copied into the draft cache; originals are preserved.
 Image thumbnails have removal buttons; image-only tasks are supported. Up to eight
 images are allowed (10 MiB and 40 megapixels each, 40 MiB combined). Attachments stay
 with the draft when changing targets, reopening during delivery, or reviewing a
