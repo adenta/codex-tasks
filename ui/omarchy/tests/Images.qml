@@ -7,7 +7,6 @@ ShellRoot {
   property int textPastes: 0
   Launcher {
     id: app
-    catalogCLI: "/bin/false"
     cli: Quickshell.env("LAUNCHER_TEST_CLI")
     function notifyDelivery(success, id) { notices++ }
     onPasteTextRequested: textPastes++
@@ -16,7 +15,7 @@ ShellRoot {
   Timer {
     interval: 150;repeat:true;running:true
     onTriggered: {
-      if(app.busy || app.pasting)return
+      if(app.busy || app.pasting || app.catalogRefreshing)return
       switch(stage++) {
       case 0:
         app.open("{}")

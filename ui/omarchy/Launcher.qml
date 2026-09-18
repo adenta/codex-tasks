@@ -38,7 +38,6 @@ Item {
   property string modelProvidersError: ""
   property string catalogWarning: ""
   property string catalogRefreshedAt: ""
-  property string catalogCLI: Quickshell.env("HOME") + "/.local/bin/codex-openrouter"
   readonly property bool catalogRefreshing: catalogProcess.running
   readonly property var inferenceModel: inferenceModels.find(function(m){return m.id===root.inference}) || null
   property string mode: settings.mode
@@ -150,7 +149,7 @@ Item {
   }
   function refreshCatalog(force) {
     if(catalogProcess.running)return
-    var args=[catalogCLI,"models","--json"]
+    var args=[cli,"models","--json"]
     if(force)args.push("--refresh")
     catalogProcess.command=args
     catalogProcess.running=true

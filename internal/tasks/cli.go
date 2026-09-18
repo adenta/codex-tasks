@@ -22,6 +22,7 @@ import (
 const maxMessage = 1 << 20
 const remoteLimit = 8 << 20 // accounts for JSON escaping of a 1 MiB prompt
 const help = `Usage: codex-tasks OPERATION [TASK] [OPTIONS]
+  models [--json] [--refresh]
   find --query TEXT [--archive all|active|archived] [--limit N] [--cursor CURSOR]
   projects | list [--project ID] [--archived] [--limit N] [--cursor CURSOR]
   read TASK [--turn ID] [--limit N] [--cursor CURSOR]

@@ -63,6 +63,22 @@ remote stderr is not returned. Exit 0 means the command returned successfully
 invalid arguments; 3 means an uncertain mutation. Inspect side-effect flags and
 known IDs before retrying. No mutation is replayed automatically.
 
+## Public model catalog
+
+`models --json [--refresh]` is a local catalog command and does not use the task
+result envelope or remote dispatch. Successful results contain `models` (each
+with `id`, `name`, and positive `context_length`), an RFC 3339 `refreshed_at`, and
+an optional `warning`. Models are deduplicated and sorted by ID; missing names
+use the ID. Entries without an ID or positive context length are skipped.
+
+The catalog uses the public [OpenRouter models API](https://openrouter.ai/docs/api/api-reference/models/get-models).
+Requests have a 15-second timeout and responses/cache reads are limited to 16 MiB.
+A valid cache is reused until an explicit refresh. Missing or invalid caches
+trigger fetching. Refresh failure returns valid cached data with a warning and
+exit 0; failure without usable data returns `{"error":"..."}` and exit 1.
+A cache write failure returns fetched data with a warning. Invalid arguments
+produce stderr diagnostics and exit 2. No task or inference request is made.
+
 ## Examples
 
 ```sh

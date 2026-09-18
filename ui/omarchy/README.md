@@ -81,11 +81,13 @@ star buttons save local favorites independently of the model catalog. Missing
 favorites stay visible but disabled. Space toggles a favorite when navigating
 results with the arrow keys.
 
-Install the standalone `codex-openrouter` catalog helper from codex-ops at
-`~/.local/bin/codex-openrouter` on the desktop. It reads the public OpenRouter
-catalog and keeps an atomic cache. Opening uses that cache; the refresh button
-explicitly updates it. Failure preserves cached models and subscription access.
-The helper does not handle credentials or route inference.
+The installed `codex-tasks` binary supplies the catalog through `models --json`;
+no separate helper is required. It reads the public OpenRouter catalog and keeps
+an atomic cache at `$XDG_CACHE_HOME/codex-tasks/openrouter-models.json` (default
+`~/.cache/codex-tasks/openrouter-models.json`). Opening uses that cache, fetching
+when it is missing or invalid; the refresh button explicitly updates it.
+Failure preserves cached models and subscription access. Catalog requests time
+out after 15 seconds and do not handle credentials or route inference.
 
 The destination account must already have a configured `openrouter` provider.
 Explicit model-to-provider mappings can be added to the existing

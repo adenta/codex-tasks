@@ -8,6 +8,17 @@ import (
 )
 
 var commandHelp = map[string]string{
+	"models": `models [--json] [--refresh]
+List the public OpenRouter model catalog without credentials or endpoint configuration.
+Uses $XDG_CACHE_HOME/codex-tasks/openrouter-models.json (default
+~/.cache/codex-tasks/openrouter-models.json). A missing or invalid cache triggers
+a fetch; --refresh explicitly fetches again. Requests time out after 15 seconds.
+Failed refreshes return usable cached models with a warning; without a usable
+cache they fail. Successful fetches replace the cache atomically.
+JSON contains models (id, name, context_length), refreshed_at, and optional warning.
+Without --json, prints ID, name and context tokens as tab-separated columns.
+This command is local; task routing flags are not supported. It does not configure
+providers or route inference. Example: codex-tasks models --json --refresh`,
 	"targets": `targets
 Print local and configured remote targets as JSON without a network request.
 The local entry has local: true and the actual OS hostname/account.`,
@@ -113,7 +124,7 @@ Common options: --target local|HOST/ACCOUNT or --host HOST (mutually exclusive),
 TASK accepts a UUID or codex://threads/UUID. Put flags after TASK, or TASK after
 all flags. With no selector commands use the local account; find searches all
 configured sources. --target local restricts find to the current account.
-Remote selectors do not apply to activity.
+Remote selectors do not apply to activity or models.
 Messages: --message-file FILE or - for stdin, maximum 1 MiB. Shell-quote text;
 prefer a file/stdin for multiline messages. --wait defaults to 0s, maximum 60s.
 Images: create/message accept repeatable --image FILE, always a caller-local path,
@@ -126,7 +137,7 @@ or uncertain delivery; files older than 7 days are removed on the next staging o
 clipboard capture. Caller-owned source files are never deleted. Image operations
 allow up to 2 extra minutes for staging/transfer. History text omits image content.
 Runtime actions attach to an existing account-owned Unix app-server socket.
-Only find and activity can operate without a running server. Native tools remain
+Find, activity, targets and models can operate without a running server. Native tools remain
 necessary for desktop-only tasks and handoff; the optional skill prefers native
 helpers and uses this CLI when those helpers are unavailable or insufficient.
 JSON metadata and outcomes: see docs/contract.md. Unknown/partial results retain
@@ -164,7 +175,7 @@ func Help(args []string, w io.Writer) (int, bool) {
 			}
 			if strings.HasPrefix(a, "-") && !strings.Contains(a, "=") {
 				switch a {
-				case "--wait-history", "--json", "--checkout", "--projectless", "--archived", "--include-outputs", "--follow":
+				case "--refresh", "--wait-history", "--json", "--checkout", "--projectless", "--archived", "--include-outputs", "--follow":
 				default:
 					i++
 				}
@@ -180,7 +191,7 @@ func Help(args []string, w io.Writer) (int, bool) {
 		return 2, true
 	}
 	fmt.Fprintln(w, "Usage: codex-tasks "+text)
-	if cmd != "config" {
+	if cmd != "config" && cmd != "models" {
 		fmt.Fprint(w, commonHelp)
 	}
 	return 0, true

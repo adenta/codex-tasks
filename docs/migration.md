@@ -12,8 +12,9 @@ preserved. There is no compatibility wrapper or Ops runtime dependency.
 - Root and per-command help work independently of configuration and runtime.
 - Activity and newly created worktrees use the `codex-tasks` namespace.
 - The optional skill describes standalone installation and native-helper fallback.
-- Desktop launcher, model catalog, service management and provider-audit code are
-  outside this repository.
+- The optional Omarchy launcher and public model catalog are included here.
+  The launcher uses `codex-tasks models`; no Ops catalog helper is required.
+  Service management and provider-audit code remain outside this repository.
 
 ## Cutover, when deployment is authorized
 
