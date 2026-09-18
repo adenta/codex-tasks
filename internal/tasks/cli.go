@@ -28,9 +28,9 @@ const help = `Usage: codex-tasks OPERATION [TASK] [OPTIONS]
   read TASK [--turn ID] [--limit N] [--cursor CURSOR]
        [--item ID --offset N] [--max-chars N] [--include-outputs]
   create --cwd DIRECTORY [--project ID | --projectless] [--checkout | --ref REF]
-         [--title TITLE] [--model MODEL] [--model-provider PROVIDER] [--mode plan|default] [--message-file FILE|-]
+         [--title TITLE] [--model MODEL] [--model-provider PROVIDER] [--mode plan|default] [--message-file FILE|-] [--image FILE ...]
   fork TASK [--title TITLE] [--mode plan|default]
-  message TASK --message-file FILE|- [--wait DURATION]
+  message TASK [--message-file FILE|-] [--image FILE ...] [--wait DURATION]
   progress TASK [--turn ID] [--wait DURATION]
   mode TASK --mode plan|default
   archive TASK | unarchive TASK
@@ -58,6 +58,7 @@ type Options struct {
 	SourceTaskID    string        `json:"source_task_id,omitempty"`
 	Host            string        `json:"host,omitempty"`
 	Message         string        `json:"message,omitempty"`
+	Images          []string      `json:"images,omitempty"`
 	CWD             string        `json:"cwd,omitempty"`
 	Project         string        `json:"project,omitempty"`
 	Title           string        `json:"title,omitempty"`
@@ -129,6 +130,13 @@ func parse(args []string, stdin io.Reader) (Options, error) {
 	fs.BoolVar(&o.Follow, "follow", false, "follow activity")
 	var messageFile string
 	fs.StringVar(&messageFile, "message-file", "", "file or - for stdin")
+	fs.Func("image", "local PNG/JPEG file (repeatable)", func(value string) error {
+		path, err := filepath.Abs(value)
+		if err == nil {
+			o.Images = append(o.Images, path)
+		}
+		return err
+	})
 	tail := args[1:]
 	// Accept the documented OPERATION TASK --flags form as well as flags first.
 	if len(tail) > 0 && !strings.HasPrefix(tail[0], "-") {
@@ -146,8 +154,8 @@ func parse(args []string, stdin io.Reader) (Options, error) {
 	}
 	allowed := map[string]string{
 		"find": "query archive limit cursor", "projects": "limit cursor", "list": "project archived limit cursor", "read": "turn limit cursor item offset max-chars include-outputs",
-		"create": "cwd project projectless checkout ref title model model-provider model-context-window mode message-file wait wait-history", "fork": "title mode",
-		"message": "message-file wait", "progress": "turn wait", "mode": "mode", "archive": "", "unarchive": "",
+		"create": "cwd project projectless checkout ref title model model-provider model-context-window mode message-file image wait wait-history", "fork": "title mode",
+		"message": "message-file image wait", "progress": "turn wait", "mode": "mode", "archive": "", "unarchive": "",
 		"activity": "since task action outcome limit follow",
 	}
 	names, ok := allowed[o.Action]
@@ -203,6 +211,14 @@ func parse(args []string, stdin io.Reader) (Options, error) {
 }
 
 func validate(o Options) error {
+	if len(o.Images) > maxImages || (len(o.Images) > 0 && o.Action != "create" && o.Action != "message") {
+		return fmt.Errorf("--image is supported by create/message only, up to 8 images")
+	}
+	for _, path := range o.Images {
+		if !filepath.IsAbs(path) || len(path) > 4096 || strings.ContainsRune(path, 0) {
+			return fmt.Errorf("invalid image path")
+		}
+	}
 	if o.Target != "" {
 		if o.Host != "" {
 			return fmt.Errorf("choose --target or --host, not both")
@@ -279,14 +295,14 @@ func validate(o Options) error {
 	default:
 		return fmt.Errorf("unsupported task operation")
 	}
-	if o.WaitHistory && (o.Action != "create" || strings.TrimSpace(o.Message) == "") {
-		return fmt.Errorf("--wait-history requires create with a nonempty message")
+	if o.WaitHistory && (o.Action != "create" || (strings.TrimSpace(o.Message) == "" && len(o.Images) == 0)) {
+		return fmt.Errorf("--wait-history requires create with text or images")
 	}
 	if o.Action == "create" && !(o.Projectless && o.CWD == "") && !filepath.IsAbs(o.CWD) {
 		return fmt.Errorf("create requires --cwd with an absolute directory")
 	}
-	if o.Action == "message" && strings.TrimSpace(o.Message) == "" {
-		return fmt.Errorf("message requires nonempty --message-file FILE or -")
+	if o.Action == "message" && strings.TrimSpace(o.Message) == "" && len(o.Images) == 0 {
+		return fmt.Errorf("message requires nonempty --message-file FILE or - or --image FILE")
 	}
 	if o.Action == "mode" && o.Mode == "" {
 		return fmt.Errorf("mode requires --mode plan|default")
@@ -304,6 +320,25 @@ func Run(paths endpoints.Config, args []string, stdin io.Reader, stdout, stderr 
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
+	if args[0] == "_images" && len(args) == 1 {
+		return runImages(paths, stdin, stdout)
+	}
+	if args[0] == "_clipboard-image" && len(args) == 1 {
+		ctx, done := context.WithTimeout(ctx, 10*time.Second)
+		defer done()
+		if err := clipboardImage(ctx, paths, stdout); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		return 0
+	}
+	if args[0] == "_discard-images" {
+		if err := discardDrafts(paths, args[1:]); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		return 0
+	}
 	if args[0] == "targets" {
 		if len(args) != 1 {
 			return 2
@@ -323,7 +358,7 @@ func Run(paths endpoints.Config, args []string, stdin io.Reader, stdout, stderr 
 		if len(args) != 1 {
 			return 2
 		}
-		_ = json.NewEncoder(stdout).Encode(map[string]any{"tasks_protocol": 2, "remote_launcher": true, "model_provider": true, "build_id": buildinfo.BuildID, "host": string(paths.Host), "account": paths.Account})
+		_ = json.NewEncoder(stdout).Encode(map[string]any{"tasks_protocol": 2, "remote_launcher": true, "image_attachments": true, "model_provider": true, "build_id": buildinfo.BuildID, "host": string(paths.Host), "account": paths.Account})
 		return 0
 	}
 	if args[0] == "_remote" {
@@ -369,7 +404,11 @@ func run(ctx context.Context, paths endpoints.Config, o Options, stdout, stderr 
 	// The event's started means command invocation, not target turn execution.
 	e.Outcome = "invoked"
 	logErr := log.append(e)
-	opCtx, cancel := context.WithTimeout(ctx, 30*time.Second+o.Wait)
+	timeout := 30*time.Second + o.Wait
+	if len(o.Images) > 0 {
+		timeout += 2 * time.Minute
+	}
+	opCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	var actionErr error
 	if o.Action == "find" {
@@ -465,9 +504,37 @@ func dispatch(ctx context.Context, alias string, o Options, r *Result) error {
 	if r.Account == "" {
 		return fmt.Errorf("expected destination account is required")
 	}
-	if err := checkRemoteTasks(ctx, alias, strings.ToLower(o.Host), r.Account, r, o.WaitHistory || (o.Projectless && o.CWD == ""), o.ModelProvider != ""); err != nil {
+	if err := checkRemoteTasks(ctx, alias, strings.ToLower(o.Host), r.Account, r, o.WaitHistory || (o.Projectless && o.CWD == ""), len(o.Images) > 0, o.ModelProvider != ""); err != nil {
 		r.Outcome = "failed"
 		return err
+	}
+	if len(o.Images) > 0 {
+		req := imageRequest{Host: strings.ToLower(o.Host), Account: r.Account, Action: "prepare"}
+		reply, err := remoteImages(ctx, alias, req)
+		if err != nil {
+			r.Outcome = "failed"
+			return err
+		}
+		if !filepath.IsAbs(reply.Directory) || !strings.HasPrefix(filepath.Base(reply.Directory), "send-") {
+			r.Outcome = "failed"
+			return fmt.Errorf("invalid remote attachment directory; no task was submitted")
+		}
+		// Never delete files after an uncertain submission. Cleanup of known
+		// failures gets its own bounded context, even if the upload timed out.
+		defer func() {
+			if r.Outcome != "unknown" && !r.InputAccepted {
+				cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				req.Action, req.Directory = "remove", reply.Directory
+				_, _ = remoteImages(cleanup, alias, req)
+			}
+		}()
+		o.Images, err = uploadImages(ctx, alias, reply.Directory, o.Images)
+		if err != nil {
+			r.Outcome = "failed"
+			r.ErrorCategory = "image_upload_failed"
+			return err
+		}
 	}
 	b, _ := json.Marshal(remoteRequest{Version: 2, Account: r.Account, Options: o})
 	cmd := exec.CommandContext(ctx, "ssh", "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-o", "StrictHostKeyChecking=yes", "--", alias, endpoints.Command, "_remote")
@@ -525,6 +592,11 @@ func runRemote(ctx context.Context, p endpoints.Config, args []string, stdin io.
 		o.TaskID, _ = taskID(o.TaskID)
 	}
 	r := Result{OperationID: o.OperationID, Host: string(p.Host), Account: p.Account, Action: o.Action, Outcome: "ok"}
+	if err := validateImageFiles(o.Images); err != nil {
+		setError(&r, err)
+		_ = json.NewEncoder(stdout).Encode(r)
+		return 0
+	}
 	opCtx, cancel := context.WithTimeout(ctx, 30*time.Second+o.Wait)
 	defer cancel()
 	setError(&r, executeLocal(opCtx, p, o, &r))

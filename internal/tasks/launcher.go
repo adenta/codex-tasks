@@ -39,7 +39,7 @@ func (s *service) waitHistory(ctx context.Context, r *Result) error {
 		page := Result{}
 		if err := s.items(ctx, Options{TaskID: r.Task.ID, TurnID: r.TurnID, Limit: 100, MaxChars: 4000}, &page); err == nil {
 			for _, item := range page.Items {
-				if item.Type == "userMessage" && item.TurnID == r.TurnID && item.Text != "" {
+				if item.Type == "userMessage" && item.TurnID == r.TurnID {
 					if _, err = s.thread(ctx, r.Task.ID); err == nil {
 						r.HistoryReady = true
 						return nil

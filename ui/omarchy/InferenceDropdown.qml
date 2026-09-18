@@ -26,8 +26,20 @@ Item {
     Text { text:"Inference";color:Color.popups.text;font.family:Style.font.family;font.pixelSize:Style.font.caption;font.bold:true }
     Button {
       id:trigger;width:parent.width;height:Style.spacing.controlHeight
-      text:control.value ? (control.selected ? control.selected.name : "Unavailable model") : "Subscription"
-      iconText:"󰅀";bordered:true;focusable:true;leftAlign:true;foreground:Color.popups.text
+      tooltipText:control.value ? (control.selected ? control.selected.name : "Unavailable model") : "Subscription"
+      bordered:true;focusable:true;foreground:Color.popups.text
+      Text {
+        objectName:"inferenceSelectedLabel"
+        anchors.left:parent.left;anchors.right:chevron.left;anchors.verticalCenter:parent.verticalCenter
+        anchors.leftMargin:trigger.borderLeft+trigger.horizontalPadding;anchors.rightMargin:Style.spacing.controlGap
+        text:trigger.tooltipText;textFormat:Text.PlainText;elide:Text.ElideRight
+        color:trigger.foreground;font.family:trigger.fontFamily;font.pixelSize:trigger.fontSize
+      }
+      Text {
+        id:chevron
+        anchors.right:parent.right;anchors.rightMargin:trigger.borderRight+trigger.horizontalPadding;anchors.verticalCenter:parent.verticalCenter
+        text:"󰅀";color:trigger.foreground;font.family:trigger.fontFamily;font.pixelSize:trigger.iconSize
+      }
       onClicked:popup.opened?popup.close():popup.open()
       Keys.onDownPressed:popup.open()
       QQC.Popup {
@@ -81,9 +93,18 @@ Item {
               Row {
                 width:parent.width
                 Button {
-                  width:parent.width-star.width;height:Style.space(34);text:modelData.name+(modelData.unavailable?" (unavailable)":control.value===modelData.id?"  ✓":"")
+                  id:modelButton
+                  width:parent.width-star.width;height:Style.space(34)
                   foreground:Color.popups.text;background:results.currentIndex===index?Qt.alpha(Color.accent,0.15):"transparent"
-                  leftAlign:true;enabled:!modelData.unavailable;tooltipText:modelData.id;focusable:true
+                  leftAlign:true;enabled:!modelData.unavailable;tooltipText:modelData.name+"\n"+modelData.id;focusable:true
+                  Text {
+                    objectName:"inferenceModelLabel"
+                    anchors.left:parent.left;anchors.right:parent.right;anchors.verticalCenter:parent.verticalCenter
+                    anchors.leftMargin:modelButton.borderLeft+modelButton.horizontalPadding;anchors.rightMargin:modelButton.borderRight+modelButton.horizontalPadding
+                    text:modelData.name+(modelData.unavailable?" (unavailable)":control.value===modelData.id?"  ✓":"")
+                    textFormat:Text.PlainText;elide:Text.ElideRight
+                    color:modelButton.foreground;font.family:modelButton.fontFamily;font.pixelSize:modelButton.fontSize
+                  }
                   onClicked:control.choose(modelData.id)
                 }
                 Button { id:star;width:Style.space(34);height:width;text:modelData.favorite?"★":"☆";foreground:modelData.favorite?Color.accent:Color.popups.text;focusable:true;tooltipText:modelData.favorite?"Remove favorite":"Add favorite";onClicked:control.favoriteToggled(modelData.id) }

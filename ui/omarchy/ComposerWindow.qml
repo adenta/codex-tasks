@@ -70,10 +70,26 @@ import qs.Ui
               font.family:Style.font.family;font.pixelSize:Style.space(16)
               wrapMode:TextEdit.Wrap;enabled:!root.busy && !root.uncertain
               background:null
+              Connections { target:root;function onPasteTextRequested(){editor.paste()} }
               Keys.onPressed:function(event){
-                if(event.key===Qt.Key_Escape){root.dismiss();event.accepted=true}
+                if(event.matches(StandardKey.Paste)){root.pasteClipboard();event.accepted=true}
+                else if(event.key===Qt.Key_Escape){root.dismiss();event.accepted=true}
                 else if((event.key===Qt.Key_Return || event.key===Qt.Key_Enter) && !(event.modifiers & Qt.ShiftModifier) && !inputMethodComposing){root.send(!!(event.modifiers & Qt.AltModifier));event.accepted=true}
               }
+            }
+          }
+        }
+        Flow {
+          width:parent.width;spacing:Style.space(8);visible:root.images.length>0
+          Repeater {
+            model:root.images
+            Rectangle {
+              required property var modelData
+              required property int index
+              width:Style.space(90);height:Style.space(80);radius:Style.cornerRadius
+              color:Color.menu.background;border.color:Color.popups.border;border.width:1
+              Image { anchors.fill:parent;anchors.margins:Style.space(5);source:modelData.url;fillMode:Image.PreserveAspectFit;sourceSize.width:180;sourceSize.height:160 }
+              Button { anchors.right:parent.right;anchors.top:parent.top;text:"×";width:Style.space(24);height:width;tooltipText:"Remove image";enabled:!root.busy && !root.uncertain && !root.pasting;onClicked:root.removeImage(index) }
             }
           }
         }
@@ -82,7 +98,7 @@ import qs.Ui
           QQC.BusyIndicator { width:Style.space(24);height:width;running:root.busy;visible:running }
           Text { width:parent.width-(root.busy ? Style.space(34):0);text:root.status;color:Color.popups.text;font.family:Style.font.family;font.pixelSize:Style.space(13);wrapMode:Text.Wrap }
         }
-        Text { width:parent.width;text:"Enter to send & open · Alt+Enter to send in background\nShift+Enter for a new line";color:Qt.alpha(Color.popups.text,0.6);font.family:Style.font.family;font.pixelSize:Style.space(12);wrapMode:Text.Wrap }
+        Text { width:parent.width;text:"Enter to send & open · Alt+Enter to send in background\nShift+Enter for a new line · Ctrl+V to paste text or images";color:Qt.alpha(Color.popups.text,0.6);font.family:Style.font.family;font.pixelSize:Style.space(12);wrapMode:Text.Wrap }
         Flow {
           width:parent.width;spacing:Style.space(10)
           Button {

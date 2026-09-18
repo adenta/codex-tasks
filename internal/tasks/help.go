@@ -48,7 +48,7 @@ Example: codex-tasks read TASK_UUID --limit 20 --host server`,
 	"create": `create [--cwd DIRECTORY] [--project ID | --projectless]
        [--checkout | --ref REF] [--title TITLE] [--model MODEL] [--model-provider PROVIDER]
        [--model-context-window TOKENS]
-       [--mode plan|default] [--message-file FILE|-] [--wait DURATION]
+       [--mode plan|default] [--message-file FILE|-] [--image FILE ...] [--wait DURATION]
 Create a task only within the user's requested scope. CWD must be absolute on
 the target. Match or create project assignment; ambiguous roots require --project.
 Git defaults to a detached worktree from local origin/HEAD; no guessed ref or
@@ -61,14 +61,14 @@ are handled and no provider is configured by this CLI. Optional first message st
 Title max 512 bytes. On partial/unknown preserve project/worktree/task IDs and
 inspect before another create. Never blindly replay after connection loss.
 With --projectless, omitting --cwd allocates Documents/Codex/date/task-* with work/outputs and developer instructions.
---wait-history requires a message and waits up to 10s for readable accepted input.
+--wait-history requires text or images and waits up to 10s for readable accepted input.
 Example: codex-tasks create --cwd /path/to/repo --mode plan --message-file brief.txt`,
 	"fork": `fork TASK [--title TITLE] [--mode plan|default]
 Fork persisted history before any unfinished running turn. Inherits checkout;
 does not copy uncommitted files or create a worktree. Title max 512 bytes.
 Omitted settings inherit the source. Preserve the created ID after partial setup.
 Example: codex-tasks fork TASK_UUID --title 'Follow-up review'`,
-	"message": `message TASK --message-file FILE|- [--wait DURATION]
+	"message": `message TASK [--message-file FILE|-] [--image FILE ...] [--wait DURATION]
 Send authorized input; resume unloaded tasks or steer an active turn using its
 expected turn ID. Omitted model/reasoning/permissions/mode remain unchanged.
 Accepted is not completed. Approval/input requests require the task's Codex UI.
@@ -127,6 +127,15 @@ configured sources. --target local restricts find to the current account.
 Remote selectors do not apply to activity or models.
 Messages: --message-file FILE or - for stdin, maximum 1 MiB. Shell-quote text;
 prefer a file/stdin for multiline messages. --wait defaults to 0s, maximum 60s.
+Images: create/message accept repeatable --image FILE, always a caller-local path,
+including for remote tasks. Text is optional with images. PNG/JPEG only, at most
+8 images, 10 MiB and 40 megapixels each, 40 MiB combined. Remote images use the
+existing SSH alias and installed sftp client; all uploads finish before submission.
+Remote helpers must advertise image support; no automatic update or retry occurs.
+Private copies under CODEX_HOME/codex-tasks/attachments are retained on acceptance
+or uncertain delivery; files older than 7 days are removed on the next staging or
+clipboard capture. Caller-owned source files are never deleted. Image operations
+allow up to 2 extra minutes for staging/transfer. History text omits image content.
 Runtime actions attach to an existing account-owned Unix app-server socket.
 Find, activity, targets and models can operate without a running server. Native tools remain
 necessary for desktop-only tasks and handoff; the optional skill prefers native

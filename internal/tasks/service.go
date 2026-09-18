@@ -274,7 +274,13 @@ func (s *service) execute(ctx context.Context, o Options, r *Result) error {
 
 func (s *service) message(ctx context.Context, o Options, r *Result) error {
 	t := *r.Task
-	input := []any{map[string]any{"type": "text", "text": o.Message}}
+	input := []any{}
+	if o.Message != "" {
+		input = append(input, map[string]any{"type": "text", "text": o.Message})
+	}
+	for _, path := range o.Images {
+		input = append(input, map[string]any{"type": "localImage", "path": path})
+	}
 	params := map[string]any{"threadId": t.ID, "input": input, "clientUserMessageId": o.OperationID}
 	if t.Status.Type == "active" {
 		turn, err := s.latest(ctx, t.ID)

@@ -86,6 +86,30 @@ codex-tasks unarchive TASK_UUID --host server
 Every command supports `--help` and `-h`; `help COMMAND` works too. Help and version
 work without configuration, Codex, SSH, or network access. Use `--json` for scripts.
 
+### Image attachments
+
+`create` and `message` accept repeatable `--image FILE` arguments, with or without
+text. Image paths are on the machine running the CLI, even for remote tasks:
+
+```sh
+codex-tasks create --target local --projectless --image screenshot.png
+codex-tasks create --host server --cwd /absolute/repo --message-file brief.txt --image screenshot.png
+```
+
+PNG and JPEG are supported: at most eight images, 10 MiB and 40 megapixels per
+image, and 40 MiB combined. The CLI snapshots files privately, verifies the remote
+host/account and image capability, then uploads over the existing SSH alias using
+the installed `sftp` client. The SSH server must support SFTP in the same filesystem
+as the remote CLI. All uploads finish before a task is created or messaged. There
+is no upload service, base64 transport, automatic update, or automatic retry.
+
+Copies live under `CODEX_HOME/codex-tasks/attachments` on the receiving account.
+Accepted and uncertain submissions retain their files; entries older than seven
+days are removed on subsequent attachment staging or clipboard capture, not by a
+background service. Known pre-submission failures clean up their copies when the
+destination is reachable. Caller-owned source files are never removed. Inspection
+of an uncertain task must precede any retry. CLI history text omits image content.
+
 ## Results and recovery
 
 - Follow discovery and history cursors. An incomplete search is not proof of absence.

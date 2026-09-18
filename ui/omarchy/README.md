@@ -25,6 +25,24 @@ operation is attempted.
 Enter sends and opens Codex; Alt+Enter sends in the background and closes the
 modal immediately without opening Codex. Both actions have separate buttons.
 Shift+Enter adds a newline; Escape closes and discards an idle prompt.
+Ctrl+V pastes text or PNG/JPEG images using the existing `wl-paste` executable.
+Image thumbnails have removal buttons; image-only tasks are supported. Up to eight
+images are allowed (10 MiB and 40 megapixels each, 40 MiB combined). Attachments stay
+with the draft when changing targets, reopening during delivery, or reviewing a
+failed/uncertain result. Sending is blocked while clipboard capture is pending.
+
+Local tasks receive private file copies. Remote tasks upload via the installed
+OpenSSH `sftp` client and selected SSH alias before submitting once. Both CLI
+copies must support images; older remote helpers are rejected before upload or
+task creation. No software is installed automatically. Missing clipboard/SFTP
+tools or unsupported image formats produce an error.
+
+Draft image files are deleted on removal, dismissal, or confirmed successful
+delivery. Receiving copies are retained for accepted/uncertain delivery. Managed
+files older than seven days expire on the next image capture/staging operation.
+The private cache is `CODEX_HOME/codex-tasks/attachments`; it contains image bytes,
+unlike launcher.ini. Reloading clears the in-memory draft; its abandoned files
+are subject to that same expiry. No background cleanup service is added.
 The server, project per server, Git execution choice, and cached project lists
 are stored in `~/.config/codex-tasks/launcher.ini`. Prompt text is never stored.
 Grace/no project is the first-run selection. A missing server requires explicit
@@ -39,7 +57,7 @@ another send; Open task never resends the prompt.
 
 Background sending skips the history wait and notifies when input is accepted,
 with an optional Open task action. This confirms delivery, not task completion.
-Failed or uncertain delivery retains the prompt in memory until you reopen the
+Failed or uncertain delivery retains the prompt and attachment references in memory until you reopen the
 launcher and explicitly close it or successfully retry a confirmed failure.
 Uncertain submissions cannot be resent. Reopening during delivery shows the
 existing submission; only one submission can be pending at a time. Shell restart
