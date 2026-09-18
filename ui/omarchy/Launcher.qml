@@ -30,6 +30,14 @@ Item {
   property var projectMemory: ({})
   property string host: settings.host
   property string projectId: ""
+  property string inference: ""
+  property var inferenceModels: []
+  property var favorites: []
+  property string catalogWarning: ""
+  property string catalogRefreshedAt: ""
+  property string catalogCLI: Quickshell.env("HOME") + "/.local/bin/codex-openrouter"
+  readonly property bool catalogRefreshing: catalogProcess.running
+  readonly property var inferenceModel: inferenceModels.find(function(m){return m.id===root.inference}) || null
   property string mode: settings.mode
   property var targetScreen: null
   property string cli: Quickshell.env("HOME") + "/.local/bin/codex-tasks"
@@ -46,7 +54,7 @@ Item {
   }
   readonly property var selectedProject: projects.find(function(p) { return p.id === root.projectId }) || null
   readonly property bool validServer: servers.some(function(s) { return s.value === root.host })
-  readonly property bool canSend: !busy && !pasting && !uncertain && validServer && (message.trim().length > 0 || images.length > 0) && (projectId === "" || (selectedProject !== null && !selectedProject.unavailable))
+  readonly property bool canSend: !busy && !pasting && !uncertain && validServer && (!inference || inferenceModel!==null) && (message.trim().length > 0 || images.length > 0) && (projectId === "" || (selectedProject !== null && !selectedProject.unavailable))
   readonly property var projectOptions: {
     var list = [{value:"", label:"No project"}]
     projects.forEach(function(p) { list.push({value:p.id,label:(p.name || p.id) + (p.unavailable ? " (unavailable)" : "")}) })
@@ -60,10 +68,12 @@ Item {
     property string mode: "worktree"
     property string projects: "{}"
     property string cache: "{}"
+    property string favorites: "[]"
   }
   Component.onCompleted: {
     try { cache=JSON.parse(settings.cache); projectMemory=JSON.parse(settings.projects) } catch(e) {}
     projectId=projectMemory[host] || ""
+    try { var saved=JSON.parse(settings.favorites);if(Array.isArray(saved))favorites=saved.filter(function(v,i,a){return typeof v==="string"&&a.indexOf(v)===i}) } catch(e) {}
   }
   function remember() {
     settings.host=host; settings.mode=mode
@@ -73,11 +83,12 @@ Item {
   function open(payload) {
     if (opened) { root.focusEditor(); return }
     opened=true
-    if (!busy && !recoveryPending) { status=""; uncertain=false;taskId="";clearDraft() }
+    if (!busy && !recoveryPending) { status=""; uncertain=false;taskId="";clearDraft();inference="" }
     var name=Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : ""
     targetScreen=Quickshell.screens.find(function(s){return s.name===name}) || Quickshell.screens[0]
     if (!targetsProcess.running) targetsProcess.running=true
     refresh()
+    refreshCatalog(false)
     Qt.callLater(function(){root.focusEditor()})
   }
   function close() {
@@ -118,11 +129,36 @@ Item {
     projectProcess.command=[cli,"projects","--host",host,"--limit","100","--json"]
     projectProcess.running=true
   }
+  function toggleFavorite(id) {
+    var next=favorites.slice(),i=next.indexOf(id)
+    if(i>=0)next.splice(i,1);else next.push(id)
+    favorites=next;settings.favorites=JSON.stringify(next)
+  }
+  function refreshCatalog(force) {
+    if(catalogProcess.running)return
+    var args=[catalogCLI,"models","--json"]
+    if(force)args.push("--refresh")
+    catalogProcess.command=args
+    catalogProcess.running=true
+  }
+  Process {
+    id:catalogProcess
+    stdout:StdioCollector { id:catalogOutput }
+    onExited:function(code) {
+      try {
+        var data=JSON.parse(catalogOutput.text)
+        if(code!==0||data.error)throw new Error(data.error||"Catalog unavailable")
+        if(!Array.isArray(data.models)||!data.models.length)throw new Error("Catalog is empty")
+        root.inferenceModels=data.models;root.catalogRefreshedAt=data.refreshed_at||"";root.catalogWarning=data.warning||""
+      }catch(e){root.catalogWarning="Could not refresh models. "+(root.inferenceModels.length?"Showing cached models.":"Subscription is available.")}
+    }
+  }
   function send(background) {
     if (!canSend) return
     var args=[cli,"create","--host",host,"--message-file","-","--json"]
     images.forEach(function(item){args.push("--image",item.path)})
     if (!background) args.push("--wait-history")
+    if(inferenceModel)args.push("--model-provider","openrouter","--model",inferenceModel.id,"--model-context-window",String(inferenceModel.context_length))
     if(projectId) {
       var p=selectedProject
       if(!p.roots || !p.roots.length) { status="Project has no working directory.";return }

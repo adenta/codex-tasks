@@ -7,6 +7,7 @@ ShellRoot {
   property int textPastes: 0
   Launcher {
     id: app
+    catalogCLI: "/bin/false"
     cli: Quickshell.env("LAUNCHER_TEST_CLI")
     function notifyDelivery(success, id) { notices++ }
     onPasteTextRequested: textPastes++
@@ -26,6 +27,9 @@ ShellRoot {
         break
       case 1:
         check(app.images.length===1 && app.canSend,"image-only prompt cannot send")
+        app.inference="missing"
+        check(!app.canSend,"image-only prompt bypassed inference validation")
+        app.inference=""
         app.changeHost("workstation")
         check(app.images.length===1,"host switch lost attachments")
         app.removeImage(0)
@@ -39,6 +43,7 @@ ShellRoot {
         break
       case 3:
         check(app.images.length===1 && app.canSend && !app.uncertain,"known failure lost image or blocked retry")
+        app.inferenceModels=[{id:"fixture/model",context_length:32000}];app.inference="fixture/model"
         app.message="images";app.send(true)
         break
       case 4:

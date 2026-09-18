@@ -34,13 +34,21 @@ import qs.Ui
         spacing:Style.space(16)
         Row {
           width:parent.width
-          Text { width:parent.width-Style.space(34);text:"New task";color:Color.popups.text;font.family:Style.font.family;font.pixelSize:Style.space(20);font.bold:true;anchors.verticalCenter:parent.verticalCenter }
-          Button { text:"×";fontSize:Style.space(20);width:Style.space(34);height:width;bordered:true;focusable:true;tooltipText:"Close (Esc)";enabled:!root.busy || root.backgroundSending;onClicked:root.dismiss() }
+          Text { width:parent.width-closeButton.width;text:"New task";color:Color.popups.text;font.family:Style.font.family;font.pixelSize:Style.space(20);font.bold:true;anchors.verticalCenter:parent.verticalCenter }
+          PanelActionButton {
+            id:closeButton
+            iconText:"×"
+            bordered:true;focusable:true
+            tooltipText:"Close (Esc)"
+            enabled:!root.busy || root.backgroundSending
+            onClicked:root.dismiss()
+          }
         }
         Row {
           width:parent.width;spacing:Style.space(12);enabled:!root.busy && !root.uncertain
-          Dropdown { width:parent.width*0.32;label:"Target";value:root.host;options:root.servers;onChanged:function(value){root.changeHost(value)} }
-          SearchableDropdown { width:parent.width*0.68-parent.spacing;label:root.refreshing ? "Project · refreshing…" : "Project";value:root.projectId;options:root.projectOptions;onChanged:function(value){root.projectId=value;root.remember();root.status=""} }
+          Dropdown { width:(parent.width-2*parent.spacing)*0.23;label:"Target";value:root.host;options:root.servers;onChanged:function(value){root.changeHost(value)} }
+          SearchableDropdown { width:(parent.width-2*parent.spacing)*0.37;label:root.refreshing ? "Project · refreshing…" : "Project";value:root.projectId;options:root.projectOptions;onChanged:function(value){root.projectId=value;root.remember();root.status=""} }
+          InferenceDropdown { width:(parent.width-2*parent.spacing)*0.40;value:root.inference;models:root.inferenceModels;favorites:root.favorites;refreshing:root.catalogRefreshing;refreshedAt:root.catalogRefreshedAt;warning:root.catalogWarning;onChanged:function(value){root.inference=value;root.status=""};onFavoriteToggled:function(value){root.toggleFavorite(value)};onRefreshRequested:root.refreshCatalog(true) }
         }
         Dropdown {
           width:parent.width;visible:root.selectedProject!==null && root.selectedProject.isGitRepository!==false

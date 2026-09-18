@@ -16,6 +16,7 @@ case "$1" in
     case "$prompt" in
       images)
         case " $* " in *' --image /tmp/fixture.png '*) ;; *) exit 9;; esac
+        case " $* " in *' --model-provider openrouter --model fixture/model --model-context-window 32000 '*) ;; *) exit 9;; esac
         printf '%s\n' '{"input_accepted":true,"task":{"id":"image-id"}}' ;;
       background)
         case " $* " in *' --wait-history '*) exit 9;; esac

@@ -27,7 +27,7 @@ const help = `Usage: codex-tasks OPERATION [TASK] [OPTIONS]
   read TASK [--turn ID] [--limit N] [--cursor CURSOR]
        [--item ID --offset N] [--max-chars N] [--include-outputs]
   create --cwd DIRECTORY [--project ID | --projectless] [--checkout | --ref REF]
-         [--title TITLE] [--model MODEL] [--mode plan|default] [--message-file FILE|-] [--image FILE ...]
+         [--title TITLE] [--model MODEL] [--model-provider PROVIDER] [--mode plan|default] [--message-file FILE|-] [--image FILE ...]
   fork TASK [--title TITLE] [--mode plan|default]
   message TASK [--message-file FILE|-] [--image FILE ...] [--wait DURATION]
   progress TASK [--turn ID] [--wait DURATION]
@@ -61,6 +61,8 @@ type Options struct {
 	CWD             string        `json:"cwd,omitempty"`
 	Project         string        `json:"project,omitempty"`
 	Title           string        `json:"title,omitempty"`
+	ModelProvider   string        `json:"model_provider,omitempty"`
+	ContextWindow   int           `json:"context_window,omitempty"`
 	Model           string        `json:"model,omitempty"`
 	Mode            string        `json:"mode,omitempty"`
 	Ref             string        `json:"ref,omitempty"`
@@ -108,6 +110,8 @@ func parse(args []string, stdin io.Reader) (Options, error) {
 	fs.StringVar(&o.Project, "project", "", "project ID")
 	fs.StringVar(&o.Title, "title", "", "task title")
 	fs.StringVar(&o.Model, "model", "", "model override for new task")
+	fs.StringVar(&o.ModelProvider, "model-provider", "", "configured provider for new task")
+	fs.IntVar(&o.ContextWindow, "model-context-window", 0, "context tokens for explicit custom model")
 	fs.StringVar(&o.Mode, "mode", "", "plan or default")
 	fs.StringVar(&o.Ref, "ref", "", "Git starting ref")
 	fs.BoolVar(&o.Checkout, "checkout", false, "use existing checkout")
@@ -149,7 +153,7 @@ func parse(args []string, stdin io.Reader) (Options, error) {
 	}
 	allowed := map[string]string{
 		"find": "query archive limit cursor", "projects": "limit cursor", "list": "project archived limit cursor", "read": "turn limit cursor item offset max-chars include-outputs",
-		"create": "cwd project projectless checkout ref title model mode message-file image wait wait-history", "fork": "title mode",
+		"create": "cwd project projectless checkout ref title model model-provider model-context-window mode message-file image wait wait-history", "fork": "title mode",
 		"message": "message-file image wait", "progress": "turn wait", "mode": "mode", "archive": "", "unarchive": "",
 		"activity": "since task action outcome limit follow",
 	}
@@ -246,6 +250,12 @@ func validate(o Options) error {
 	}
 	if o.Wait < 0 || o.Wait > 60*time.Second {
 		return fmt.Errorf("wait must be between 0s and 60s")
+	}
+	if o.ModelProvider != "" && (o.Action != "create" || o.Model == "" || len(o.ModelProvider) > 128 || strings.ContainsAny(o.ModelProvider, " \t\n\r")) {
+		return fmt.Errorf("--model-provider requires create with --model and a provider ID")
+	}
+	if o.ContextWindow < 0 || (o.ContextWindow != 0 && (o.ModelProvider == "" || o.ContextWindow < 1024)) {
+		return fmt.Errorf("--model-context-window requires an explicit provider and at least 1024 tokens")
 	}
 	if o.Mode != "" && o.Mode != "plan" && o.Mode != "default" {
 		return fmt.Errorf("mode must be plan or default")
@@ -347,7 +357,7 @@ func Run(paths endpoints.Config, args []string, stdin io.Reader, stdout, stderr 
 		if len(args) != 1 {
 			return 2
 		}
-		_ = json.NewEncoder(stdout).Encode(map[string]any{"tasks_protocol": 2, "remote_launcher": true, "image_attachments": true, "build_id": buildinfo.BuildID, "host": string(paths.Host), "account": paths.Account})
+		_ = json.NewEncoder(stdout).Encode(map[string]any{"tasks_protocol": 2, "remote_launcher": true, "image_attachments": true, "model_provider": true, "build_id": buildinfo.BuildID, "host": string(paths.Host), "account": paths.Account})
 		return 0
 	}
 	if args[0] == "_remote" {
@@ -493,7 +503,7 @@ func dispatch(ctx context.Context, alias string, o Options, r *Result) error {
 	if r.Account == "" {
 		return fmt.Errorf("expected destination account is required")
 	}
-	if err := checkRemoteTasks(ctx, alias, strings.ToLower(o.Host), r.Account, r, o.WaitHistory || (o.Projectless && o.CWD == ""), len(o.Images) > 0); err != nil {
+	if err := checkRemoteTasks(ctx, alias, strings.ToLower(o.Host), r.Account, r, o.WaitHistory || (o.Projectless && o.CWD == ""), len(o.Images) > 0, o.ModelProvider != ""); err != nil {
 		r.Outcome = "failed"
 		return err
 	}

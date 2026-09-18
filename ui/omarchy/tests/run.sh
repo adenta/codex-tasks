@@ -23,3 +23,9 @@ QT_QPA_PLATFORM=offscreen QT_QPA_PLATFORMTHEME=generic QT_QUICK_CONTROLS_STYLE=B
 cat "$test_root/images.log"
 grep -q IMAGE_FIXTURE_PASS "$test_root/images.log"
 ! grep -q 'Error:' "$test_root/images.log"
+node "$src/tests/inference.test.cjs"
+cp "$src/tests/Inference.qml" "$test_root/shell.qml"
+QT_QPA_PLATFORM=offscreen QT_QPA_PLATFORMTHEME=generic QT_QUICK_CONTROLS_STYLE=Basic XDG_RUNTIME_DIR="$test_root" timeout 15 quickshell -p "$test_root/shell.qml" >"$test_root/inference.log" 2>&1
+cat "$test_root/inference.log"
+grep -q INFERENCE_QML_PASS "$test_root/inference.log"
+! grep -q 'Error:' "$test_root/inference.log"
