@@ -58,7 +58,7 @@ func render(w io.Writer, r Result, asJSON bool) {
 		printTask(t)
 	}
 	for _, c := range r.Coverage {
-		status := map[string]string{"complete": "search complete", "more": "more tasks remain to search", "unavailable": "could not search", "native_tools_required": "desktop search requires native tools"}[c.Status]
+		status := map[string]string{"complete": "search complete", "more": "more tasks remain to search", "unavailable": "could not search"}[c.Status]
 		fmt.Fprintf(w, "\n%s: %s.\n", clean(c.Target, 160), status)
 		if c.Detail != "" {
 			fmt.Fprintln(w, clean(c.Detail, 1200))

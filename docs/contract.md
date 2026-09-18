@@ -11,7 +11,7 @@ turn status are observations, separate from the command's `outcome`.
 | `outcome` | `ok`, `found`, `ambiguous`, `not_found`, `incomplete`, `created`, `partial`, `accepted`, `started`, `completed`, `needs_attention`, `settings_updated`, `archived`, `unarchived`, `interrupted`, `failed`, or `unknown` |
 | `task`, `tasks` | Original `id`, `name`, `cwd`, `projectId`, `status`; find adds owning `host`, `account`, and `archived` |
 | `coverage` | Find sources: `target`, `status`, optional explanatory `detail` |
-| `search_complete` | All selected source coverage completed; desktop/native sources count as incomplete in CLI-only discovery |
+| `search_complete` | All selected source coverage completed; unavailable sources count as incomplete |
 | `next_cursor` | More scanning remains. Repeat the same command, selectors, and filters with this opaque cursor |
 | `items` | History items: `id`, `turn_id`, `type`, `text`; truncation adds `truncated`, `next_offset`, `continuation_cursor`; `omitted_parts` counts non-text message parts |
 | `omitted_items` | Scanned non-message items omitted from this page |
@@ -29,8 +29,7 @@ Private remote requests require protocol 2 and an exact destination account;
 the private read-only handshake returns `tasks_protocol`, `host`, `account`, and `build_id`. This is internal, not a new public capability
 command or desktop-control interface.
 
-Find coverage statuses are `complete`, `more`, `unavailable`, and
-`native_tools_required`. `found` does not imply complete coverage. `ambiguous`
+Find coverage statuses are `complete`, `more`, and `unavailable`. `found` does not imply complete coverage. `ambiguous`
 counts matches over continued pages. `not_found` is only returned for a completed
 selected search. Limit is per configured source (default 20, maximum 100). A source
 scans at most 1000 canonical index entries before returning a continuation.
@@ -79,8 +78,8 @@ Project ID: …
 Workspace: /home/agent/workspaces/example
 
 love/agent: search complete.
-xps/andre: desktop search requires native tools.
-Use native desktop tools to find/read these tasks; remote messaging is unavailable.
+xps/andre: could not search.
+Connection refused.
 
 Search coverage is incomplete. Missing results do not establish that a task does not exist.
 ```

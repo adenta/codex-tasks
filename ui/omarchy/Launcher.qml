@@ -151,7 +151,7 @@ Item {
         if(code!==0)throw new Error(targetsError.text || "Could not load servers")
         var data=JSON.parse(targetsOutput.text)
         root.desktopProjects=data.desktop_projects || []
-        root.servers=(data.targets || []).filter(function(t){return !t.native_only}).map(function(t){return {value:t.host,label:t.host}})
+        root.servers=(data.targets || []).map(function(t){return {value:t.host,label:t.local ? "local" : t.host}})
         if(!root.validServer) root.status="Select an available server."
       }catch(e){root.status=String(e)}
     }

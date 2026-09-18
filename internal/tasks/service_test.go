@@ -312,7 +312,7 @@ func TestActivityFailureDoesNotChangeOperationOutcome(t *testing.T) {
 	code := run(context.Background(), p, o, &out, &errs)
 	var r Result
 	_ = json.Unmarshal([]byte(out.String()), &r)
-	if code != 1 || r.ErrorCategory != "unsupported_operation" || r.ActivityStatus != "unavailable" || !strings.Contains(errs.String(), "Warning") {
+	if code != 1 || r.ErrorCategory != "transport_unavailable" || r.ActivityStatus != "unavailable" || !strings.Contains(errs.String(), "Warning") {
 		t.Fatalf("%d %+v %s", code, r, errs.String())
 	}
 }

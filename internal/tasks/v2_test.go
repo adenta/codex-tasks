@@ -187,17 +187,17 @@ func TestDiscoveryCoverageAndDuplicateLocations(t *testing.T) {
 	if err := discover(context.Background(), p, o, &r, execute); err != nil {
 		t.Fatal(err)
 	}
-	if r.Outcome != "ambiguous" || r.SearchComplete == nil || *r.SearchComplete {
+	if r.Outcome != "ambiguous" || r.SearchComplete == nil || !*r.SearchComplete {
 		t.Fatal(r)
 	}
 	for _, task := range r.Tasks {
-		if task.Host == "" || task.Account != "agent" || task.Name != "Review" {
+		if task.Host == "" || (task.Account != "agent" && task.Account != "andre") || task.Name != "Review" {
 			t.Fatal(task)
 		}
 	}
 	r = Result{}
 	partiallyOffline := func(ctx context.Context, p endpoints.Config, o Options, r *Result) error {
-		if o.Target == "love/agent" {
+		if o.Target == "love/agent" || o.Target == "xps/andre" {
 			return errors.New("host offline")
 		}
 		return execute(ctx, p, o, r)
@@ -205,12 +205,13 @@ func TestDiscoveryCoverageAndDuplicateLocations(t *testing.T) {
 	if err := discover(context.Background(), p, o, &r, partiallyOffline); err != nil || r.Outcome != "found" || r.SearchComplete == nil || *r.SearchComplete {
 		t.Fatal(r, err)
 	}
-	native, offline := false, false
+	offline := 0
 	for _, c := range r.Coverage {
-		native = native || c.Status == "native_tools_required"
-		offline = offline || c.Detail == "host offline"
+		if c.Status == "unavailable" && c.Detail == "host offline" {
+			offline++
+		}
 	}
-	if !native || !offline {
+	if offline != 2 {
 		t.Fatal(r.Coverage)
 	}
 	o.Target = "grace/agent"
@@ -261,12 +262,11 @@ func TestV2SelectorsAndDestinationRejection(t *testing.T) {
 	p, _ := fixtureAccount("grace", "agent", "/home/agent")
 	o := opts("read", id)
 	o.Target = "xps/andre"
-	r := Result{}
-	if err := executeAt(context.Background(), p, o, &r); err == nil || r.ErrorCategory != "unsupported_operation" {
-		t.Fatal(r, err)
+	if host, account, alias, err := resolveRoute(p, o); err != nil || host != "xps" || account != "andre" || alias != "xps" {
+		t.Fatal(host, account, alias, err)
 	}
 	o.Target = "love/agent"
-	r = Result{}
+	r := Result{}
 	if err := executeAt(context.Background(), p, o, &r); err == nil || r.ErrorCategory != "route_unavailable" {
 		t.Fatal(r, err)
 	}

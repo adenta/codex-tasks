@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 case "$1" in
-  targets) printf '%s\n' '{"targets":[{"host":"grace"}]}' ;;
+  targets) printf '%s\n' '{"targets":[{"host":"workstation","local":true},{"host":"grace"}]}' ;;
   projects) printf '%s\n' '{"projects":[]}' ;;
   create)
     prompt=$(cat)

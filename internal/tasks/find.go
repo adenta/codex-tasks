@@ -121,6 +121,7 @@ func (s *service) find(ctx context.Context, o Options, r *Result) error {
 type executor func(context.Context, endpoints.Config, Options, *Result) error
 
 func discover(ctx context.Context, p endpoints.Config, o Options, r *Result, execute executor) error {
+	o = localTarget(p, o)
 	encoded, _ := json.Marshal(p)
 	scope := fmt.Sprintf("%s/%s|%s|%s|%x", p.Host, p.Account, o.Host, o.Target, sha256.Sum256(encoded))
 	state := findCursor{Version: 1, Query: o.Query, Archive: o.Archive, Scope: scope, Sources: map[string]string{}}
@@ -144,7 +145,7 @@ func discover(ctx context.Context, p endpoints.Config, o Options, r *Result, exe
 		sources = append(sources, Coverage{Target: target})
 	}
 	if len(sources) == 0 {
-		return fmt.Errorf("selected account has no task endpoint; use native desktop tools for desktop tasks")
+		return fmt.Errorf("selected account has no configured task endpoint")
 	}
 	results := make([]Result, len(sources))
 	var wg sync.WaitGroup
@@ -153,16 +154,6 @@ func discover(ctx context.Context, p endpoints.Config, o Options, r *Result, exe
 		go func(i int) {
 			defer wg.Done()
 			c := &sources[i]
-			native := false
-			for _, t := range p.Sources() {
-				if t.Host+"/"+t.Account == c.Target {
-					native = t.NativeOnly
-				}
-			}
-			if native {
-				c.Status, c.Detail = "native_tools_required", "Use native desktop tools to find/read these tasks; remote messaging is unavailable."
-				return
-			}
 			if cursor, ok := state.Sources[c.Target]; ok && cursor == "done" {
 				c.Status = "complete"
 				return

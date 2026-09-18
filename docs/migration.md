@@ -58,3 +58,16 @@ codex app-server generate-json-schema --experimental --out /temporary/schema
 
 Compare required fields and run the isolated tests before changing the supported
 version. See [official app-server documentation](https://learn.chatgpt.com/docs/app-server).
+
+## Local targets and endpoint availability
+
+`--target local` selects the executing OS account, including for local-only
+searches. `targets` now includes that account with `local: true`; the popup labels
+it `local` and remembers the selection using the actual hostname.
+
+The `native_only` setting has been removed. Before using the updated CLI, delete
+that field from the top level and any target entries in your configuration.
+Every remote target requires an explicit SSH alias. Remove inventory-only entries
+that have no usable SSH route, or configure an existing alias for them.
+Unknown configuration fields are rejected rather than silently ignored.
+Endpoint availability is determined by actual index access and server connections.

@@ -35,10 +35,13 @@ Project IDs and paths belong to the owning machine/account.
 
 Task IDs and `codex://threads/UUID` links are accepted. `--target HOST/ACCOUNT`
 selects an explicit endpoint; `--host HOST` uses the calling account's configured
-SSH alias. Do not combine these selectors or change identities,
+SSH alias. `--target local` selects the executing CLI's OS account and restricts
+`find` to that account; it does not refer to the desktop when the CLI runs remotely.
+Do not combine these selectors or change identities,
 permissions, or SSH configuration to bypass missing access. Destination identity
-and protocol are verified before remote dispatch. Desktop tasks require native
-tools for discovery/reading; remote desktop messaging is outside codex-tasks support.
+and protocol are verified before remote dispatch. CLI access depends on the
+account’s task index and existing app-server socket; report actual access or
+connection failures rather than assuming desktop accounts are unsupported.
 Preserve native `hostId` values exactly: native `local` identifies the desktop
 runtime's host, not necessarily the machine executing the agent's shell.
 
@@ -130,5 +133,6 @@ For an explicitly requested projectless task, `create --projectless` may omit
 `--cwd` to allocate Documents/Codex on the destination account, with work/outputs
 and matching developer instructions. `--wait-history` requires a first message
 and waits up to ten seconds for readable accepted input; it does not mean the
-turn completed. `targets` prints remote configuration without network requests.
+turn completed. `targets` prints local and remote endpoints without network requests;
+the local entry has `local: true` and its actual hostname/account.
 The optional Omarchy popup is documented in ui/omarchy/README.md.

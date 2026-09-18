@@ -23,7 +23,7 @@ func desktopProjects(c endpoints.Config) []map[string]string {
 	out := []map[string]string{}
 	for _, p := range state.Projects {
 		for _, t := range c.Targets {
-			if !t.NativeOnly && t.Alias != "" && p.HostID == "remote-ssh-discovered:"+t.Alias && filepath.IsAbs(p.Path) {
+			if t.Alias != "" && p.HostID == "remote-ssh-discovered:"+t.Alias && filepath.IsAbs(p.Path) {
 				out = append(out, map[string]string{"host": t.Host, "path": p.Path, "name": p.Label})
 				break
 			}

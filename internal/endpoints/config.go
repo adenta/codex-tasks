@@ -25,18 +25,16 @@ func ParseHost(s string) (string, error) {
 }
 
 type Target struct {
-	Host       string `json:"host"`
-	Account    string `json:"account"`
-	Alias      string `json:"ssh_alias,omitempty"`
-	NativeOnly bool   `json:"native_only,omitempty"`
+	Host    string `json:"host"`
+	Account string `json:"account"`
+	Alias   string `json:"ssh_alias,omitempty"`
 }
 type Config struct {
-	Host       string   `json:"-"`
-	Account    string   `json:"-"`
-	CodexHome  string   `json:"codex_home,omitempty"`
-	Socket     string   `json:"socket,omitempty"`
-	NativeOnly bool     `json:"native_only,omitempty"`
-	Targets    []Target `json:"targets,omitempty"`
+	Host      string   `json:"-"`
+	Account   string   `json:"-"`
+	CodexHome string   `json:"codex_home,omitempty"`
+	Socket    string   `json:"socket,omitempty"`
+	Targets   []Target `json:"targets,omitempty"`
 }
 
 func (c Config) SocketPath() string {
@@ -46,7 +44,7 @@ func (c Config) SocketPath() string {
 	return filepath.Join(c.CodexHome, "app-server-control/app-server-control.sock")
 }
 func (c Config) Sources() []Target {
-	out := []Target{{Host: c.Host, Account: c.Account, NativeOnly: c.NativeOnly}}
+	out := []Target{{Host: c.Host, Account: c.Account}}
 	return append(out, c.Targets...)
 }
 
@@ -110,7 +108,7 @@ func Load() (Config, error) {
 	for i := range c.Targets {
 		t := &c.Targets[i]
 		t.Host = strings.ToLower(t.Host)
-		if !ValidIdentity(t.Host) || !ValidIdentity(t.Account) || (!t.NativeOnly && !ValidIdentity(t.Alias)) {
+		if !ValidIdentity(t.Host) || !ValidIdentity(t.Account) || !ValidIdentity(t.Alias) {
 			return c, fmt.Errorf("target requires valid host, account and existing SSH alias")
 		}
 		if seen[t.Host] {

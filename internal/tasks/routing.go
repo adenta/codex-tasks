@@ -14,7 +14,7 @@ import (
 func splitTarget(value string) (string, string, error) {
 	parts := strings.Split(value, "/")
 	if len(parts) != 2 {
-		return "", "", fmt.Errorf("target must be HOST/ACCOUNT")
+		return "", "", fmt.Errorf("target must be local or HOST/ACCOUNT")
 	}
 	host := strings.ToLower(parts[0])
 	if !endpoints.ValidIdentity(host) || !endpoints.ValidIdentity(parts[1]) {
@@ -23,7 +23,16 @@ func splitTarget(value string) (string, string, error) {
 	return host, parts[1], nil
 }
 
+// Expand the shorthand before routing, discovery, or activity attribution.
+func localTarget(p endpoints.Config, o Options) Options {
+	if o.Target == "local" {
+		o.Target = p.Host + "/" + p.Account
+	}
+	return o
+}
+
 func resolveRoute(p endpoints.Config, o Options) (host, account, alias string, err error) {
+	o = localTarget(p, o)
 	host, account = p.Host, p.Account
 	if o.Host != "" {
 		host = strings.ToLower(o.Host)
@@ -43,10 +52,6 @@ func resolveRoute(p endpoints.Config, o Options) (host, account, alias string, e
 			return
 		}
 		account = t.Account
-		if t.NativeOnly {
-			err = fmt.Errorf("%s/%s is a desktop account; use native desktop tools", host, account)
-			return
-		}
 		if host != p.Host {
 			if t.Alias == "" {
 				err = fmt.Errorf("no configured SSH route to %s/%s", host, account)
@@ -65,9 +70,6 @@ func executeAt(ctx context.Context, p endpoints.Config, o Options, r *Result) er
 	r.Host, r.Account = host, account
 	if err != nil {
 		r.ErrorCategory = "route_unavailable"
-		if strings.Contains(err.Error(), "desktop account") {
-			r.ErrorCategory = "unsupported_operation"
-		}
 		return err
 	}
 	o.Target, o.Host = "", host

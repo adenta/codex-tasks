@@ -35,7 +35,7 @@ const help = `Usage: codex-tasks OPERATION [TASK] [OPTIONS]
   archive TASK | unarchive TASK
   activity [--since DURATION] [--task ID] [--action NAME] [--outcome VALUE]
            [--limit N] [--follow]
-Common: --target HOST/ACCOUNT or --host HOST; --json for scripts.
+Common: --target local|HOST/ACCOUNT or --host HOST; --json for scripts.
 Operation attribution: --source-task ID
 Defaults: English output; find searches inventory, other commands use the local account.
 20 results per source/page, no wait, 24h activity; --wait is at most 60s.
@@ -94,7 +94,7 @@ func parse(args []string, stdin io.Reader) (Options, error) {
 	fs := flag.NewFlagSet("tasks "+o.Action, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	fs.StringVar(&o.Host, "host", "", "configured host")
-	fs.StringVar(&o.Target, "target", "", "host/account")
+	fs.StringVar(&o.Target, "target", "", "local or host/account")
 	fs.StringVar(&o.Query, "query", "", "task link, ID, or title/preview words")
 	fs.StringVar(&o.Archive, "archive", "", "all, active, or archived")
 	fs.StringVar(&o.ItemID, "item", "", "read one history item")
@@ -202,8 +202,10 @@ func validate(o Options) error {
 		if o.Host != "" {
 			return fmt.Errorf("choose --target or --host, not both")
 		}
-		if _, _, err := splitTarget(o.Target); err != nil {
-			return err
+		if o.Target != "local" {
+			if _, _, err := splitTarget(o.Target); err != nil {
+				return err
+			}
 		}
 	}
 	if o.Action == "find" && (strings.TrimSpace(o.Query) == "" || len(o.Query) > 1000) {
@@ -295,7 +297,15 @@ func Run(paths endpoints.Config, args []string, stdin io.Reader, stdout, stderr 
 		if len(args) != 1 {
 			return 2
 		}
-		_ = json.NewEncoder(stdout).Encode(map[string]any{"targets": paths.Targets, "desktop_projects": desktopProjects(paths)})
+		type listedTarget struct {
+			endpoints.Target
+			Local bool `json:"local,omitempty"`
+		}
+		targets := []listedTarget{}
+		for i, t := range paths.Sources() {
+			targets = append(targets, listedTarget{Target: t, Local: i == 0})
+		}
+		_ = json.NewEncoder(stdout).Encode(map[string]any{"targets": targets, "desktop_projects": desktopProjects(paths)})
 		return 0
 	}
 	if args[0] == "_capabilities" {
@@ -330,6 +340,7 @@ func Run(paths endpoints.Config, args []string, stdin io.Reader, stdout, stderr 
 }
 
 func run(ctx context.Context, paths endpoints.Config, o Options, stdout, stderr io.Writer) int {
+	o = localTarget(paths, o)
 	start := time.Now()
 	target := string(paths.Host)
 	if o.Host != "" {
@@ -405,10 +416,6 @@ func setError(r *Result, err error) {
 
 func executeLocal(ctx context.Context, p endpoints.Config, o Options, r *Result) error {
 	r.Host, r.Account = string(p.Host), p.Account
-	if p.NativeOnly {
-		r.ErrorCategory = "unsupported_operation"
-		return fmt.Errorf("%s/%s requires native desktop task tools", p.Host, p.Account)
-	}
 	if o.Action == "find" {
 		return (&service{home: p.CodexHome}).find(ctx, o, r)
 	}

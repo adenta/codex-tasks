@@ -30,6 +30,8 @@ ShellRoot {
         check(!app.opened && app.busy, "pending background cannot be hidden")
         break
       case 1:
+        check(app.servers.some(function(s){return s.value==="workstation" && s.label==="local"}), "local target missing")
+        app.changeHost("workstation")
         check(openedTasks===0 && notices===1 && lastSuccess, "background opened Codex or did not notify")
         check(app.message==="" && app.taskId==="background-id", "background delivery not recorded")
         app.opened=true;app.message="foreground";app.send(false)

@@ -9,7 +9,8 @@ import (
 
 var commandHelp = map[string]string{
 	"targets": `targets
-Print configured remote targets as JSON without making a network request.`,
+Print local and configured remote targets as JSON without a network request.
+The local entry has local: true and the actual OS hostname/account.`,
 	"find": `find --query TEXT [--archive all|active|archived] [--limit N] [--cursor CURSOR]
 Search IDs, codex://threads/UUID links, titles and previews on configured sources.
 Includes archives by default; limit 20 per source (1–100), scan bound 1000 entries.
@@ -88,7 +89,6 @@ Read $CODEX_TASKS_CONFIG, otherwise $XDG_CONFIG_HOME/codex-tasks/config.json
 account only. Identity comes from the OS hostname and username.
 Example configuration on your desktop:
 {
-  "native_only": true,
   "targets": [{"host":"server","account":"agent","ssh_alias":"my-server"}]
 }
 Use the real remote hostname/account and an existing SSH alias. One account per
@@ -97,7 +97,6 @@ Optional local "codex_home" and "socket" are absolute paths. CODEX_HOME override
 codex_home; otherwise ~/.codex. Default socket is
 CODEX_HOME/app-server-control/app-server-control.sock. Remote paths are resolved
 by the remote helper's own configuration, never copied from the caller.
-Set native_only for desktop-owned endpoints that require native tools.
 No SSH configuration, login, service or app-server lifecycle changes are made.
 For connection failures verify the alias/account and running server with its
 owner. The CLI never starts a replacement server. Incompatible helpers must be
@@ -105,11 +104,12 @@ updated manually. No task recreation or automatic mutation retry is attempted.`,
 }
 
 const commonHelp = `
-Common options: --target HOST/ACCOUNT or --host HOST (mutually exclusive),
+Common options: --target local|HOST/ACCOUNT or --host HOST (mutually exclusive),
 --json (one result object), --source-task UUID (default CODEX_THREAD_ID).
 TASK accepts a UUID or codex://threads/UUID. Put flags after TASK, or TASK after
 all flags. With no selector commands use the local account; find searches all
-configured sources. Remote selectors do not apply to activity.
+configured sources. --target local restricts find to the current account.
+Remote selectors do not apply to activity.
 Messages: --message-file FILE or - for stdin, maximum 1 MiB. Shell-quote text;
 prefer a file/stdin for multiline messages. --wait defaults to 0s, maximum 60s.
 Runtime actions attach to an existing account-owned Unix app-server socket.

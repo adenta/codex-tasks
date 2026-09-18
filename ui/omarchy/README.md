@@ -1,4 +1,4 @@
-# Omarchy remote task popup
+# Omarchy task popup
 
 Optional Quickshell plugin for the codex-tasks CLI. Uses stock Omarchy controls
 and theme tokens. No extra daemon, Codex modifications, or local worker.
@@ -17,7 +17,10 @@ o.bind("ALT + SPACE", "New remote Codex task", "omarchy-shell shell summon adent
 
 Check existing bindings before replacing one. Reload Hyprland and check errors.
 The plugin can also be opened with that shell command. Uses the CLI installed at
-`~/.local/bin/codex-tasks` and remote hosts in its normal configuration.
+`~/.local/bin/codex-tasks`, the local account, and remote hosts in its normal
+configuration. The target picker labels the current machine `local`; it uses
+that account's existing app server. Connection failures are reported when an
+operation is attempted.
 
 Enter sends and opens Codex; Alt+Enter sends in the background and closes the
 modal immediately without opening Codex. Both actions have separate buttons.

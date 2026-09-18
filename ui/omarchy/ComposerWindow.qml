@@ -34,12 +34,12 @@ import qs.Ui
         spacing:Style.space(16)
         Row {
           width:parent.width
-          Text { width:parent.width-Style.space(34);text:"New remote task";color:Color.popups.text;font.family:Style.font.family;font.pixelSize:Style.space(20);font.bold:true;anchors.verticalCenter:parent.verticalCenter }
+          Text { width:parent.width-Style.space(34);text:"New task";color:Color.popups.text;font.family:Style.font.family;font.pixelSize:Style.space(20);font.bold:true;anchors.verticalCenter:parent.verticalCenter }
           Button { text:"×";fontSize:Style.space(20);width:Style.space(34);height:width;bordered:true;focusable:true;tooltipText:"Close (Esc)";enabled:!root.busy || root.backgroundSending;onClicked:root.dismiss() }
         }
         Row {
           width:parent.width;spacing:Style.space(12);enabled:!root.busy && !root.uncertain
-          Dropdown { width:parent.width*0.32;label:"Server";value:root.host;options:root.servers;onChanged:function(value){root.changeHost(value)} }
+          Dropdown { width:parent.width*0.32;label:"Target";value:root.host;options:root.servers;onChanged:function(value){root.changeHost(value)} }
           SearchableDropdown { width:parent.width*0.68-parent.spacing;label:root.refreshing ? "Project · refreshing…" : "Project";value:root.projectId;options:root.projectOptions;onChanged:function(value){root.projectId=value;root.remember();root.status=""} }
         }
         Dropdown {

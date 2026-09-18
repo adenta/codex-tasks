@@ -46,21 +46,20 @@ Updating or removing the skill has no effect on the executable.
 ## Configure existing endpoints
 
 Local commands use the current OS hostname/account and `$CODEX_HOME`, defaulting
-to `~/.codex`. For remote access create
+to `~/.codex`. Use `--target local` to explicitly select this account, including
+to restrict `find` to local tasks. For remote access create
 `~/.config/codex-tasks/config.json` (or use `$CODEX_TASKS_CONFIG`):
 
 ```json
 {
-  "native_only": true,
   "targets": [
     {"host": "server", "account": "agent", "ssh_alias": "my-server"}
   ]
 }
 ```
 
-This example runs on a desktop whose own tasks need native helpers. `server`
-is the actual remote hostname, `agent` its OS account, and `my-server` an existing
-SSH alias. Set `native_only` only for endpoints needing native tools. Configure
+`server` is the actual remote hostname, `agent` its OS account, and `my-server`
+an existing SSH alias. Configure
 one destination account per host. Identity is checked before remote dispatch.
 No named hosts are built in.
 
@@ -126,7 +125,9 @@ See [migration and validation notes](docs/migration.md). Extracted from
 
 See [ui/omarchy](ui/omarchy/README.md) for a themed remote task composer and an
 Alt+Space binding. The CLI remains independent of Quickshell and Omarchy.
-`targets` prints configured remote destinations as JSON without network access.
+`targets` prints the local account and configured remote destinations as JSON
+without network access. The local entry includes `local: true` with its actual
+hostname/account, and appears as `local` in the popup's target picker.
 `create --projectless` can omit `--cwd` to allocate a unique workspace under the
 executing account's Documents/Codex, with work/outputs and developer instructions.
 `create --wait-history --message-file -` waits up to ten seconds for readable
