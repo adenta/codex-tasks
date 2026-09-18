@@ -46,9 +46,11 @@ files older than seven days expire on the next image capture/staging operation.
 The private cache is `CODEX_HOME/codex-tasks/attachments`; it contains image bytes,
 unlike launcher.ini. Reloading clears the in-memory draft; its abandoned files
 are subject to that same expiry. No background cleanup service is added.
-The server, project per server, Git execution choice, and cached project lists
+The server, Git execution choice, and cached project lists
 are stored in `~/.config/codex-tasks/launcher.ini`. Prompt text is never stored.
-Grace/no project is the first-run selection. A missing server requires explicit
+Each fresh composer starts with no project, like the Subscription model default;
+changing servers also clears the project selection. Grace is the first-run server.
+A missing server requires explicit
 selection; destinations are never silently substituted.
 
 Opening uses cached project choices with a background refresh. A host change

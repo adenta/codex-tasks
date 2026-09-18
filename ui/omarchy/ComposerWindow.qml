@@ -57,7 +57,7 @@ import qs.Ui
         Row {
           width:parent.width;spacing:Style.space(12);enabled:!root.busy && !root.uncertain
           Dropdown { width:(parent.width-2*parent.spacing)*0.23;label:"Target";value:root.host;options:root.servers;onChanged:function(value){root.changeHost(value)} }
-          SearchableDropdown { width:(parent.width-2*parent.spacing)*0.37;label:root.refreshing ? "Project · refreshing…" : "Project";value:root.projectId;options:root.projectOptions;onChanged:function(value){root.projectId=value;root.remember();root.status=""} }
+          SearchableDropdown { width:(parent.width-2*parent.spacing)*0.37;label:root.refreshing ? "Project · refreshing…" : "Project";value:root.projectId;options:root.projectOptions;onChanged:function(value){root.projectId=value;root.status=""} }
           InferenceDropdown { width:(parent.width-2*parent.spacing)*0.40;value:root.inference;models:root.inferenceModels;favorites:root.favorites;refreshing:root.catalogRefreshing;refreshedAt:root.catalogRefreshedAt;warning:root.catalogWarning;onChanged:function(value){root.inference=value;root.status=""};onFavoriteToggled:function(value){root.toggleFavorite(value)};onRefreshRequested:root.refreshCatalog(true) }
         }
         Dropdown {

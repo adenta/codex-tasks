@@ -27,7 +27,6 @@ Item {
   property var servers: []
   property var desktopProjects: []
   property var cache: ({})
-  property var projectMemory: ({})
   property string host: settings.host
   property string projectId: ""
   property string inference: ""
@@ -65,24 +64,20 @@ Item {
     location: "file://" + (Quickshell.env("CODEX_TASKS_LAUNCHER_SETTINGS") || (Quickshell.env("HOME") + "/.config/codex-tasks/launcher.ini"))
     property string host: "grace"
     property string mode: "worktree"
-    property string projects: "{}"
     property string cache: "{}"
     property string favorites: "[]"
   }
   Component.onCompleted: {
-    try { cache=JSON.parse(settings.cache); projectMemory=JSON.parse(settings.projects) } catch(e) {}
-    projectId=projectMemory[host] || ""
+    try { cache=JSON.parse(settings.cache) } catch(e) {}
     try { var saved=JSON.parse(settings.favorites);if(Array.isArray(saved))favorites=saved.filter(function(v,i,a){return typeof v==="string"&&a.indexOf(v)===i}) } catch(e) {}
   }
   function remember() {
     settings.host=host; settings.mode=mode
-    var m=Object.assign({},projectMemory);m[host]=projectId;projectMemory=m
-    settings.projects=JSON.stringify(m)
   }
   function open(payload) {
     if (opened) { root.focusEditor(); return }
     opened=true
-    if (!busy && !recoveryPending) { status=""; uncertain=false;taskId="";clearDraft();inference="" }
+    if (!busy && !recoveryPending) { status=""; uncertain=false;taskId="";clearDraft();projectId="";inference="" }
     var name=Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : ""
     targetScreen=Quickshell.screens.find(function(s){return s.name===name}) || Quickshell.screens[0]
     if (!targetsProcess.running) targetsProcess.running=true
@@ -127,7 +122,7 @@ Item {
     clipboardProcess.running=true
   }
   function changeHost(value) {
-    host=value;projectId=projectMemory[host] || "";remember();status="";refresh()
+    host=value;projectId="";remember();status="";refresh()
   }
   function refresh() {
     if (busy || !host) return
