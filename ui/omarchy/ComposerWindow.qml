@@ -60,31 +60,6 @@ import qs.Ui
           SearchableDropdown { width:(parent.width-2*parent.spacing)*0.37;label:root.refreshing ? "Project · refreshing…" : "Project";value:root.projectId;options:root.projectOptions;onChanged:function(value){root.projectId=value;root.remember();root.status=""} }
           InferenceDropdown { width:(parent.width-2*parent.spacing)*0.40;value:root.inference;models:root.inferenceModels;favorites:root.favorites;refreshing:root.catalogRefreshing;refreshedAt:root.catalogRefreshedAt;warning:root.catalogWarning;onChanged:function(value){root.inference=value;root.status=""};onFavoriteToggled:function(value){root.toggleFavorite(value)};onRefreshRequested:root.refreshCatalog(true) }
         }
-        Dropdown {
-          width:parent.width;visible:root.selectedProject!==null && root.selectedProject.isGitRepository!==false
-          label:"Run in";value:root.mode;options:[{value:"worktree",label:"New worktree"},{value:"checkout",label:"Existing checkout"}]
-          enabled:!root.busy && !root.uncertain
-          onChanged:function(value){root.mode=value;root.remember()}
-        }
-        Column {
-          width:parent.width;spacing:Style.space(6);visible:root.usesNewWorktree
-          Dropdown {
-            width:parent.width;label:root.environmentsLoading ? "Environment · loading…" : "Environment"
-            value:root.environment;options:root.environmentOptions
-            enabled:!root.busy && !root.uncertain && !root.environmentsLoading && !root.environmentError
-            onChanged:function(value){root.chooseEnvironment(value)}
-          }
-          Text {
-            width:parent.width;visible:text!==""
-            text:root.environmentError || (root.selectedEnvironment ? root.selectedEnvironment.error || "" : "")
-            color:Color.popups.text;font.family:Style.font.family;font.pixelSize:Style.space(12);wrapMode:Text.Wrap
-          }
-          Button {
-            text:"Retry environment discovery";visible:root.environmentError!==""
-            enabled:!root.busy && !root.uncertain && !root.environmentsLoading
-            onClicked:root.refreshEnvironments()
-          }
-        }
         Rectangle {
           width:parent.width;height:Style.space(190);color:Color.menu.background;radius:Style.cornerRadius
           border.color:editor.activeFocus ? Color.accent : Color.popups.border
@@ -108,10 +83,45 @@ import qs.Ui
             }
           }
         }
-        Button {
-          text:"Attach image…";bordered:true;focusable:true
-          enabled:!root.busy && !root.uncertain && !root.pasting && root.images.length<8
-          onClicked:imagePicker.open()
+        Row {
+          id:workspaceControls
+          width:parent.width;spacing:Style.space(12)
+          readonly property real pickerWidth: Math.max(0,Math.min(Style.space(190),(width-attachButton.implicitWidth-2*spacing)/2))
+          Dropdown {
+            width:workspaceControls.pickerWidth
+            visible:root.selectedProject!==null && root.selectedProject.isGitRepository!==false
+            label:"Run in";value:root.mode;options:[{value:"worktree",label:"New worktree"},{value:"checkout",label:"Existing checkout"}]
+            enabled:!root.busy && !root.uncertain
+            onChanged:function(value){root.mode=value;root.remember()}
+          }
+          Dropdown {
+            width:workspaceControls.pickerWidth;visible:root.usesNewWorktree
+            label:root.environmentsLoading ? "Environment · loading…" : "Environment"
+            value:root.environment;options:root.environmentOptions
+            enabled:!root.busy && !root.uncertain && !root.environmentsLoading && !root.environmentError
+            onChanged:function(value){root.chooseEnvironment(value)}
+          }
+          Button {
+            id:attachButton
+            anchors.bottom:parent.bottom;height:Style.spacing.controlHeight
+            text:"Attach image…";bordered:true;focusable:true
+            enabled:!root.busy && !root.uncertain && !root.pasting && root.images.length<8
+            onClicked:imagePicker.open()
+          }
+        }
+        Column {
+          width:parent.width;spacing:Style.space(6)
+          visible:root.usesNewWorktree && (!!root.environmentError || !!(root.selectedEnvironment && root.selectedEnvironment.error))
+          Text {
+            width:parent.width;visible:text!==""
+            text:root.environmentError || (root.selectedEnvironment ? root.selectedEnvironment.error || "" : "")
+            color:Color.popups.text;font.family:Style.font.family;font.pixelSize:Style.space(12);wrapMode:Text.Wrap
+          }
+          Button {
+            text:"Retry environment discovery";visible:root.environmentError!==""
+            enabled:!root.busy && !root.uncertain && !root.environmentsLoading
+            onClicked:root.refreshEnvironments()
+          }
         }
         Flow {
           width:parent.width;spacing:Style.space(8);visible:root.images.length>0
