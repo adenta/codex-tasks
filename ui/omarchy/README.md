@@ -112,6 +112,11 @@ star buttons save local favorites independently of the model catalog. Missing
 favorites stay visible but disabled. Space toggles a favorite when navigating
 results with the arrow keys.
 
+Selecting an OpenRouter model shows an `@preset/codex-tasks` link below the
+selector. It opens the preset's OpenRouter settings. The slug and settings UUID
+are fixed constants, not launcher preferences; the CLI applies the preset to
+the model ID. Subscription mode hides the link.
+
 The installed `codex-tasks` binary supplies the catalog through `models --json`;
 no separate helper is required. It reads the public OpenRouter catalog and keeps
 an atomic cache at `$XDG_CACHE_HOME/codex-tasks/openrouter-models.json` (default
