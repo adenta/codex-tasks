@@ -3,17 +3,14 @@ package tasks
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
 
-func TestCreationPresetAndInitialInput(t *testing.T) {
+func TestCreationProviderAndInitialInput(t *testing.T) {
 	for _, tc := range []struct{ provider, model, want string }{
-		{"openrouter", "vendor/model", "vendor/model@preset/codex-tasks"},
-		{"openrouter", "vendor/model@preset/codex-tasks", "vendor/model@preset/codex-tasks"},
-		{"custom", "vendor/model", "vendor/model"},
+		{"modal", "fixture.us-west.modal.direct", "fixture.us-west.modal.direct"},
+		{"custom", "fixture.us-west.modal.direct", "fixture.us-west.modal.direct"},
 		{"", "", "configured-model"},
 	} {
 		t.Run(tc.provider+tc.model, func(t *testing.T) {
@@ -54,43 +51,25 @@ func TestCreationPresetAndInitialInput(t *testing.T) {
 	}
 }
 
-func TestConflictingPresetFailsBeforeMutation(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	for _, model := range []string{"vendor/model@preset/other", "@preset/codex-tasks", "vendor/model@preset/codex-tasks@preset/codex-tasks", "vendor/model@preset/"} {
-		o := opts("create", "")
-		o.Projectless, o.ModelProvider, o.Model = true, "openrouter", model
-		f := &fakeRPC{handle: func(m string, p map[string]any) (any, error) { t.Fatalf("mutation attempted: %s", m); return nil, nil }}
-		s := service{rpc: f, home: home}
-		r := Result{}
-		if err := s.create(context.Background(), o, &r); err == nil || r.Workspace != "" || r.Created {
-			t.Fatalf("accepted conflict: %+v %v", r, err)
-		}
-	}
-	if _, err := os.Stat(filepath.Join(home, "Documents")); !os.IsNotExist(err) {
-		t.Fatal("allocated projectless workspace before validation")
-	}
-}
-
-func TestPresetFailureNeverFallsBack(t *testing.T) {
-	for _, failure := range []string{"model-mismatch", "missing-preset", "inference-error"} {
+func TestProviderFailureNeverFallsBack(t *testing.T) {
+	for _, failure := range []string{"model-mismatch", "missing-endpoint", "inference-error"} {
 		t.Run(failure, func(t *testing.T) {
 			o := opts("create", "")
 			o.CWD = t.TempDir()
 			o.Projectless = true
-			o.ModelProvider = "openrouter"
-			o.Model = "vendor/model"
+			o.ModelProvider = "modal"
+			o.Model = "fixture.us-west.modal.direct"
 			o.Message = "hello"
 			f := &fakeRPC{handle: func(m string, p map[string]any) (any, error) {
 				if m == "thread/start" {
-					if p["model"] != "vendor/model@preset/codex-tasks" {
+					if p["model"] != "fixture.us-west.modal.direct" {
 						t.Fatal("unrestricted retry")
 					}
 					model := p["model"]
 					if failure == "model-mismatch" {
-						model = o.Model
+						model = "wrong-model"
 					}
-					return map[string]any{"thread": storedTask(), "model": model, "modelProvider": "openrouter"}, nil
+					return map[string]any{"thread": storedTask(), "model": model, "modelProvider": "modal"}, nil
 				}
 				if m == "turn/start" && failure != "model-mismatch" {
 					return nil, fmt.Errorf("%s", failure)
@@ -118,7 +97,7 @@ func TestProviderMismatchNeverStartsPaidTurn(t *testing.T) {
 	o := opts("create", "")
 	o.CWD = t.TempDir()
 	o.Projectless = true
-	o.Model = "vendor/model"
+	o.Model = "fixture.us-west.modal.direct"
 	o.ModelProvider = "custom"
 	o.ContextWindow = 32000
 	o.Message = "must not be sent"
@@ -127,13 +106,13 @@ func TestProviderMismatchNeverStartsPaidTurn(t *testing.T) {
 		if m != "thread/start" {
 			return nil, fmt.Errorf("unexpected RPC: %s", m)
 		}
-		if p["modelProvider"] != "custom" || p["model"] != "vendor/model" || p["serviceTier"] != "default" {
+		if p["modelProvider"] != "custom" || p["model"] != "fixture.us-west.modal.direct" || p["serviceTier"] != "default" {
 			t.Fatalf("wrong request: %#v", p)
 		}
 		if p["config"].(map[string]any)["model_context_window"] != 32000 {
 			t.Fatal("context not supplied")
 		}
-		return map[string]any{"thread": task, "model": "vendor/model", "modelProvider": "wrong"}, nil
+		return map[string]any{"thread": task, "model": "fixture.us-west.modal.direct", "modelProvider": "wrong"}, nil
 	}}
 	s := service{rpc: f, home: t.TempDir()}
 	r := Result{}
@@ -148,7 +127,7 @@ func TestProviderFlagValidation(t *testing.T) {
 			t.Fatalf("accepted invalid flags: %v", args)
 		}
 	}
-	o, err := parse([]string{"create", "--projectless", "--model-provider", "custom", "--model", "vendor/model", "--model-context-window", "32000"}, strings.NewReader(""))
+	o, err := parse([]string{"create", "--projectless", "--model-provider", "custom", "--model", "fixture.us-west.modal.direct", "--model-context-window", "32000"}, strings.NewReader(""))
 	if err != nil || o.ModelProvider != "custom" || o.ContextWindow != 32000 {
 		t.Fatalf("%+v %v", o, err)
 	}

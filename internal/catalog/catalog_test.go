@@ -14,12 +14,13 @@ import (
 )
 
 func TestCatalogCacheLifecycle(t *testing.T) {
+	t.Setenv("MODAL_PROXY_TOKEN", "wk-test.ws-test")
 	calls := 0
 	fail := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
-		if r.Header.Get("Authorization") != "" {
-			t.Error("unexpected credentials")
+		if r.Header.Get("Authorization") != "Bearer wk-test.ws-test" {
+			t.Error("missing proxy authentication")
 		}
 		if fail {
 			http.Error(w, "unavailable", 503)
@@ -63,6 +64,7 @@ func TestCatalogCacheLifecycle(t *testing.T) {
 }
 
 func TestInvalidResponses(t *testing.T) {
+	t.Setenv("MODAL_PROXY_TOKEN", "wk-test.ws-test")
 	for _, body := range []string{`broken`, `{}`, `{"data":[]}`, `{"data":[{"id":"bad","context_length":-1}]}`, `{"data":[]} {}`} {
 		t.Run(body, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(body)) }))
@@ -82,6 +84,7 @@ func TestInvalidResponses(t *testing.T) {
 }
 
 func TestTimeout(t *testing.T) {
+	t.Setenv("MODAL_PROXY_TOKEN", "wk-test.ws-test")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
 	defer server.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
@@ -92,6 +95,7 @@ func TestTimeout(t *testing.T) {
 }
 
 func TestInvalidCacheAndSaveFailure(t *testing.T) {
+	t.Setenv("MODAL_PROXY_TOKEN", "wk-test.ws-test")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"data":[{"id":"a","context_length":10}]}`))
 	}))
@@ -109,9 +113,10 @@ func TestInvalidCacheAndSaveFailure(t *testing.T) {
 }
 
 func TestRunCachedAndInvalidArguments(t *testing.T) {
+	t.Setenv("MODAL_PROXY_TOKEN", "wk-test.ws-test")
 	dir := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", dir)
-	path := filepath.Join(dir, "codex-tasks", "openrouter-models.json")
+	path := filepath.Join(dir, "codex-tasks", "modal-models.json")
 	if err := writeCache(path, Result{MetadataVersion: 1, Models: []Model{{ID: "a", Name: "Alpha", ContextLength: 10}}, RefreshedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
@@ -127,6 +132,7 @@ func TestRunCachedAndInvalidArguments(t *testing.T) {
 }
 
 func TestLegacyMetadataRefresh(t *testing.T) {
+	t.Setenv("MODAL_PROXY_TOKEN", "wk-test.ws-test")
 	for _, fail := range []bool{false, true} {
 		t.Run(fmt.Sprint(fail), func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "models.json")
@@ -140,7 +146,7 @@ func TestLegacyMetadataRefresh(t *testing.T) {
 					http.Error(w, "down", 503)
 					return
 				}
-				w.Write([]byte(`{"data":[{"id":"a","context_length":10,"reasoning":{"supported_efforts":["max","low"]}}]}`))
+				w.Write([]byte(`{"data":[{"id":"a","context_length":10,"reasoning_options":[{"type":"effort","values":["max","low"]}]}]}`))
 			}))
 			defer server.Close()
 			for i := 0; i < 2; i++ {
@@ -156,5 +162,31 @@ func TestLegacyMetadataRefresh(t *testing.T) {
 				t.Fatalf("migration fetched %d times", calls)
 			}
 		})
+	}
+}
+
+func TestProxyTokenValidationDoesNotExposeSecrets(t *testing.T) {
+	for _, token := range []string{"ak-sensitive.as-sensitive", "wk-secret.ws-secret\nextra", "wk-only"} {
+		t.Setenv("MODAL_PROXY_TOKEN", token)
+		_, err := proxyToken(context.Background())
+		if err == nil || strings.Contains(err.Error(), token) {
+			t.Fatalf("invalid credential accepted or exposed: %v", err)
+		}
+	}
+	t.Setenv("MODAL_PROXY_TOKEN", "wk-test.ws-test")
+	token, err := proxyToken(context.Background())
+	if err != nil || token != "wk-test.ws-test" {
+		t.Fatal("valid proxy credential rejected")
+	}
+}
+
+func TestMissingCredentialDoesNotFetch(t *testing.T) {
+	t.Setenv("MODAL_PROXY_TOKEN", "")
+	t.Setenv("PATH", t.TempDir())
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { t.Error("unauthenticated request sent") }))
+	defer server.Close()
+	_, err := fetch(context.Background(), server.Client(), server.URL)
+	if err == nil || !strings.Contains(err.Error(), "credential unavailable") {
+		t.Fatalf("wrong missing-credential result: %v", err)
 	}
 }

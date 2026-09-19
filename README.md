@@ -163,25 +163,39 @@ See [migration and validation notes](docs/migration.md). Extracted from
 [adenta/codex-ops](https://github.com/adenta/codex-ops), snapshot
 `ef47c97e74086501019f76671e140c9a5abaf3fa`.
 
-## OpenRouter routing
+## Modal inference
 
-New tasks explicitly using `--model-provider openrouter` keep the selected model
-and automatically use the shared OpenRouter preset, for example
-`deepseek/deepseek-v4.1-flash@preset/codex-tasks`. The invoking CLI applies this
-once; matching suffixes are accepted and other preset suffixes are rejected.
-The preset must exist in the workspace accessible to that host's API key.
-Manage its routing preferences on OpenRouter: updates affect subsequent requests,
-including existing preset-qualified tasks. Rules apply to every model using it.
-Missing-preset or inference errors never cause a retry with the plain model.
-Subscription, other providers, and existing plain-model tasks are unchanged.
-No launcher configuration or gateway is needed. To rename the shared preset,
-change `openRouterPreset` in the CLI source and update the invoking client.
+New tasks selected from the launcher use the configured `modal` provider and
+Modal's endpoint hostname as the model ID. No routing preset is appended.
+Subscription continues to use the destination's current Codex defaults.
+The model and provider remain explicit when forking a task.
+
+Configure Modal on each execution host with Responses over HTTPS:
+
+```toml
+[model_providers.modal]
+name = "Modal"
+base_url = "https://inference.us-west.modal.direct/v1"
+wire_api = "responses"
+requires_openai_auth = false
+supports_websockets = false
+env_key = "MODAL_PROXY_TOKEN"
+```
+
+Set `MODAL_PROXY_TOKEN` to the combined proxy token `wk-<id>.ws-<secret>`
+in the app-server environment, or use Codex's provider auth command backed by
+an existing credential store. API tokens (ak-/as-) are not inference credentials.
+Create Shared Endpoints separately in Modal; the CLI does not provision models,
+manage credentials, or configure billing. Existing OpenRouter task history is
+not migrated or silently rerouted.
 
 ## Optional Omarchy popup
 
-The public OpenRouter catalog is built into `codex-tasks models --json`.
+The authenticated Modal workspace catalog is built into `codex-tasks models --json`.
 Use `--refresh` to update it explicitly; otherwise a valid local cache is reused.
-Catalog access requires no endpoint configuration, credentials, or Ops helper.
+Catalog refresh reads MODAL_PROXY_TOKEN, or uses the desktop keyring via
+`secret-tool lookup application codex-tasks provider modal`. Cached reads and
+help work offline. Only endpoints available to that credential are listed.
 See `codex-tasks help models` for cache location and failure behavior.
 
 See [ui/omarchy](ui/omarchy/README.md) for a themed remote task composer and an
@@ -195,6 +209,6 @@ executing account's Documents/Codex, with work/outputs and developer instruction
 accepted input before returning `history_ready: true`; this does not wait for
 inference completion.
 
-OpenRouter models with advertised reasoning levels expose an Effort selector.
+Modal models with advertised reasoning levels expose an Effort selector.
 Default preserves the server's configured behavior. `create --reasoning-effort`
 sets and verifies the selected value through the stock app-server interface.

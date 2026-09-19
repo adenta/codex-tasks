@@ -234,8 +234,8 @@ func (s *service) execute(ctx context.Context, o Options, r *Result) error {
 	case "fork":
 		params := map[string]any{"threadId": t.ID, "excludeTurns": true, "deferGoalContinuation": true, "threadSource": "agent_created_thread"}
 		// Fork defaults may come from host configuration rather than the parent.
-		// Keep a preset-qualified parent's routing selection explicit.
-		if t.ModelProvider == "openrouter" && strings.Contains(t.Model, "@preset/") {
+		// Preserve the parent's explicit provider and model.
+		if t.ModelProvider != "" && t.Model != "" {
 			params["model"] = t.Model
 			params["modelProvider"] = t.ModelProvider
 		}

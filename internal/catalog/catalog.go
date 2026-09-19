@@ -1,4 +1,4 @@
-// Package catalog provides credential-free OpenRouter model discovery.
+// Package catalog provides authenticated Modal model discovery.
 package catalog
 
 import (
@@ -9,13 +9,14 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 )
 
-const endpoint = "https://openrouter.ai/api/v1/models"
+const endpoint = "https://inference.us-west.modal.direct/v1/models"
 const maxBytes = 16 << 20
 
 type Reasoning struct {
@@ -88,7 +89,7 @@ func writeCache(path string, result Result) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return err
 	}
-	f, err := os.CreateTemp(filepath.Dir(path), ".openrouter-models-*")
+	f, err := os.CreateTemp(filepath.Dir(path), ".modal-models-*")
 	if err != nil {
 		return err
 	}
@@ -105,11 +106,16 @@ func writeCache(path string, result Result) error {
 
 func fetch(ctx context.Context, client *http.Client, url string) (Result, error) {
 	var result Result
+	token, err := proxyToken(ctx)
+	if err != nil {
+		return result, err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return result, err
 	}
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err := client.Do(req)
 	if err != nil {
 		return result, err
@@ -119,12 +125,30 @@ func fetch(ctx context.Context, client *http.Client, url string) (Result, error)
 		return result, fmt.Errorf("catalog HTTP status %d", resp.StatusCode)
 	}
 	var payload struct {
-		Data []Model `json:"data"`
+		Data []struct {
+			Model
+			ReasoningOptions []struct {
+				Type   string   `json:"type"`
+				Values []string `json:"values"`
+			} `json:"reasoning_options"`
+		} `json:"data"`
 	}
 	if err = decode(resp.Body, &payload); err != nil {
 		return result, fmt.Errorf("invalid catalog: %w", err)
 	}
-	result.Models = normalize(payload.Data)
+	models := make([]Model, 0, len(payload.Data))
+	for _, raw := range payload.Data {
+		m := raw.Model
+		m.Reasoning = nil
+		for _, option := range raw.ReasoningOptions {
+			if option.Type == "effort" {
+				m.Reasoning = &Reasoning{SupportedEfforts: option.Values}
+				break
+			}
+		}
+		models = append(models, m)
+	}
+	result.Models = normalize(models)
 	if len(result.Models) == 0 {
 		return result, fmt.Errorf("catalog has no usable models")
 	}
@@ -158,12 +182,29 @@ func load(ctx context.Context, client *http.Client, url, path string, refresh bo
 	return result, nil
 }
 
+// proxyToken reads the caller's configured inference credential without exposing
+// keyring errors (which can contain sensitive command output).
+func proxyToken(ctx context.Context) (string, error) {
+	token := strings.TrimSpace(os.Getenv("MODAL_PROXY_TOKEN"))
+	if token == "" {
+		output, err := exec.CommandContext(ctx, "secret-tool", "lookup", "application", "codex-tasks", "provider", "modal").Output()
+		if err != nil {
+			return "", fmt.Errorf("Modal credential unavailable: set MODAL_PROXY_TOKEN or unlock the desktop keyring")
+		}
+		token = strings.TrimSpace(string(output))
+	}
+	if !strings.HasPrefix(token, "wk-") || !strings.Contains(token, ".ws-") || strings.ContainsAny(token, " \r\n\t") {
+		return "", fmt.Errorf("Modal requires a combined proxy token (wk-….ws-…)")
+	}
+	return token, nil
+}
+
 // Run handles the local models command independently of task configuration.
 func Run(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("models", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	asJSON := fs.Bool("json", false, "JSON output")
-	refresh := fs.Bool("refresh", false, "refresh the public catalog")
+	refresh := fs.Bool("refresh", false, "refresh the Modal workspace catalog")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -176,7 +217,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	if err == nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		result, err = load(ctx, &http.Client{Timeout: 15 * time.Second}, endpoint, filepath.Join(dir, "codex-tasks", "openrouter-models.json"), *refresh)
+		result, err = load(ctx, &http.Client{Timeout: 15 * time.Second}, endpoint, filepath.Join(dir, "codex-tasks", "modal-models.json"), *refresh)
 	}
 	if err != nil {
 		if *asJSON {

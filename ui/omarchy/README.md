@@ -112,24 +112,21 @@ star buttons save local favorites independently of the model catalog. Missing
 favorites stay visible but disabled. Space toggles a favorite when navigating
 results with the arrow keys.
 
-Selecting an OpenRouter model shows an `@preset/codex-tasks` link below the
-selector. It opens the preset's OpenRouter settings. The slug and settings UUID
-are fixed constants, not launcher preferences; the CLI applies the preset to
-the model ID. Subscription mode hides the link.
-
 The installed `codex-tasks` binary supplies the catalog through `models --json`;
-no separate helper is required. It reads the public OpenRouter catalog and keeps
-an atomic cache at `$XDG_CACHE_HOME/codex-tasks/openrouter-models.json` (default
-`~/.cache/codex-tasks/openrouter-models.json`). Opening uses that cache, fetching
+no separate helper is required. It reads the authenticated Modal workspace catalog and keeps
+an atomic cache at `$XDG_CACHE_HOME/codex-tasks/modal-models.json` (default
+`~/.cache/codex-tasks/modal-models.json`). Opening uses that cache, fetching
 when it is missing or invalid; the refresh button explicitly updates it.
 Failure preserves cached models and subscription access. Catalog requests time
-out after 15 seconds and do not handle credentials or route inference.
+out after 15 seconds. Refresh uses `MODAL_PROXY_TOKEN` or the desktop keyring
+(`application=codex-tasks, provider=modal`); catalog requests never run inference.
+Modal favorites are stored separately from previous OpenRouter favorites.
 
-The destination account must already have a configured `openrouter` provider.
+The destination account must already have a configured `modal` Responses provider.
 Selecting a model passes its ID, provider, and advertised context size through
 `codex-tasks create` and the stock app-server API. No automatic provider fallback or
 resubmission occurs. Ordinary subscription tasks and Credits are unchanged.
 
-For OpenRouter models, the Effort selector offers Default and advertised reasoning
+For Modal models, the Effort selector offers Default and advertised reasoning
 levels. Default preserves destination configuration. Fresh drafts and model changes
 reset it; failed submissions retain it. It uses the stock app-server interface.

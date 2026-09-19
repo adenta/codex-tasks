@@ -90,13 +90,13 @@ Item {
     property string host: "grace"
     property string mode: "worktree"
     property string cache: "{}"
-    property string favorites: "[]"
+    property string modalFavorites: "[]"
     property string environments: "{}"
   }
   Component.onCompleted: {
     try { cache=JSON.parse(settings.cache) } catch(e) {}
     try { environmentMemory=JSON.parse(settings.environments) || {} } catch(e) {}
-    try { var saved=JSON.parse(settings.favorites);if(Array.isArray(saved))favorites=saved.filter(function(v,i,a){return typeof v==="string"&&a.indexOf(v)===i}) } catch(e) {}
+    try { var saved=JSON.parse(settings.modalFavorites);if(Array.isArray(saved))favorites=saved.filter(function(v,i,a){return typeof v==="string"&&a.indexOf(v)===i}) } catch(e) {}
   }
   function remember() {
     settings.host=host; settings.mode=mode
@@ -192,7 +192,7 @@ Item {
   function toggleFavorite(id) {
     var next=favorites.slice(),i=next.indexOf(id)
     if(i>=0)next.splice(i,1);else next.push(id)
-    favorites=next;settings.favorites=JSON.stringify(next)
+    favorites=next;settings.modalFavorites=JSON.stringify(next)
   }
   function refreshCatalog(force) {
     if(catalogProcess.running)return
@@ -218,7 +218,7 @@ Item {
     var args=[cli,"create","--host",host,"--message-file","-","--json"]
     images.forEach(function(item){args.push("--image",item.path)})
     if (!background) args.push("--wait-history")
-    if(inferenceModel)args.push("--model-provider","openrouter","--model",inferenceModel.id,"--model-context-window",String(inferenceModel.context_length))
+    if(inferenceModel)args.push("--model-provider","modal","--model",inferenceModel.id,"--model-context-window",String(inferenceModel.context_length))
     if(inferenceModel && reasoningEffort)args.push("--reasoning-effort",reasoningEffort)
     if(usesNewWorktree && environment)args.push("--environment",environment)
     if(projectId) {

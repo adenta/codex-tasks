@@ -16,9 +16,11 @@ directories return no environments; malformed files are listed as unavailable.
 Version 1 TOML is supported, including multiline setup scripts and OS overrides.
 Example: codex-tasks environments --host server --cwd /path/to/repo --json`,
 	"models": `models [--json] [--refresh]
-List the public OpenRouter model catalog without credentials or endpoint configuration.
-Uses $XDG_CACHE_HOME/codex-tasks/openrouter-models.json (default
-~/.cache/codex-tasks/openrouter-models.json). A missing or invalid cache triggers
+List the Modal workspace model catalog. Refresh uses MODAL_PROXY_TOKEN or the
+desktop keyring (application=codex-tasks, provider=modal). Use a combined
+wk-<id>.ws-<secret> proxy credential. Cached reads need no credentials.
+Uses $XDG_CACHE_HOME/codex-tasks/modal-models.json (default
+~/.cache/codex-tasks/modal-models.json). A missing or invalid cache triggers
 a fetch; --refresh explicitly fetches again. Requests time out after 15 seconds.
 Failed refreshes return usable cached models with a warning; without a usable
 cache they fail. Successful fetches replace the cache atomically.
@@ -82,13 +84,10 @@ Omitted model/provider/mode preserve server defaults. Provider selection require
 --model and an already-configured provider on the execution host. Optional
 --reasoning-effort selects an advertised effort for the new task. Omit it to keep
 the configured default. The returned setting is verified before sending input.
---model-context-window supplies the custom model context limit. No credentials
-are handled and no provider is configured by this CLI. Optional first message starts work.
-Explicit OpenRouter models use MODEL@preset/codex-tasks, applied on the execution
-host. An existing matching suffix is accepted; other presets are rejected.
-Manage routing in that OpenRouter preset; edits affect subsequent requests from
-existing preset tasks. Existing plain-model tasks and other providers are unchanged.
-Preset errors never trigger a retry without the preset.
+--model-context-window supplies the custom model context limit. Task creation does not handle inference credentials or configure providers. Optional first message starts work.
+Modal tasks use endpoint hostnames as model IDs and --model-provider modal.
+The execution account must already have a Modal Responses provider configured.
+No provider preset is appended; there is no automatic inference fallback.
 Title max 512 bytes. On partial/unknown preserve project/worktree/task IDs and
 inspect before another create. Never blindly replay after connection loss.
 With --projectless, omitting --cwd allocates Documents/Codex/date/task-* with work/outputs and developer instructions.
