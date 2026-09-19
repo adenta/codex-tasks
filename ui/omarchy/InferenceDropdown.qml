@@ -6,6 +6,10 @@ import "Inference.js" as Inference
 
 Item {
   id: control
+  // Keep the slug aligned with internal/tasks/provider.go.
+  readonly property string presetSlug: "codex-tasks"
+  readonly property string presetUUID: "f9b96265-c3b7-4ec0-b9dd-6f7a7c13ab5f"
+  readonly property string presetURL: "https://openrouter.ai/workspaces/default/presets/" + presetUUID
   property string value: ""
   property var models: []
   property var favorites: []
@@ -116,6 +120,21 @@ Item {
           Text { width:parent.width;text:control.refreshing?"Refreshing…":control.warning || (control.refreshedAt?"Updated "+new Date(control.refreshedAt).toLocaleString():"Refresh to load models");wrapMode:Text.Wrap;color:Qt.alpha(Color.popups.text,0.65);font.family:Style.font.family;font.pixelSize:Style.font.caption }
         }
       }
+    }
+    QQC.Label {
+      objectName:"inferencePresetDescription"
+      visible:control.value!=="";width:parent.width
+      text:'<a href="'+control.presetURL+'">@preset/'+control.presetSlug+'</a>'
+      textFormat:Text.StyledText;wrapMode:Text.Wrap
+      color:Color.popups.text;linkColor:Color.accent
+      font.family:Style.font.family;font.pixelSize:Style.font.caption
+      font.underline:activeFocus
+      activeFocusOnTab:true
+      Accessible.name:"Open preset " + control.presetSlug
+      onLinkActivated:Qt.openUrlExternally(control.presetURL)
+      Keys.onReturnPressed:Qt.openUrlExternally(control.presetURL)
+      Keys.onSpacePressed:Qt.openUrlExternally(control.presetURL)
+      HoverHandler { cursorShape:Qt.PointingHandCursor }
     }
   }
 }
