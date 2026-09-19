@@ -68,7 +68,7 @@ Failure categories include `route_unavailable`, `unsupported_operation`,
 invalid arguments; 3 means an uncertain mutation. Inspect side-effect flags and
 known IDs before retrying. No mutation is replayed automatically.
 
-## Modal model catalog
+## Public model catalog
 
 `models --json [--refresh]` is a local catalog command and does not use the task
 result envelope or remote dispatch. Successful results contain `models` (each
@@ -76,10 +76,7 @@ with `id`, `name`, and positive `context_length`), an RFC 3339 `refreshed_at`, a
 an optional `warning`. Models are deduplicated and sorted by ID; missing names
 use the ID. Entries without an ID or positive context length are skipped.
 
-The catalog uses the authenticated [Modal models API](https://modal.com/docs/guide/endpoint-integrations).
-Refresh reads `MODAL_PROXY_TOKEN` or the desktop keyring item
-`application=codex-tasks, provider=modal`. Credentials are never cached.
-Modal `reasoning_options` with type `effort` become `reasoning.supported_efforts`.
+The catalog uses the public [OpenRouter models API](https://openrouter.ai/docs/api/api-reference/models/get-models).
 Requests have a 15-second timeout and responses/cache reads are limited to 16 MiB.
 A valid cache is reused until an explicit refresh. Missing or invalid caches
 trigger fetching. Refresh failure returns valid cached data with a warning and

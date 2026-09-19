@@ -23,14 +23,14 @@ import (
 func TestStockTaskLifecycle(t *testing.T) {
 	t.Run("default-provider", func(t *testing.T) { testStockTaskLifecycle(t, "", false) })
 	t.Run("explicit-command-provider", func(t *testing.T) { testStockTaskLifecycle(t, "command_fixture", false) })
-	t.Run("modal-provider", func(t *testing.T) { testStockTaskLifecycle(t, "modal", false) })
-	t.Run("modal-remote", func(t *testing.T) { testStockTaskLifecycle(t, "modal", true) })
+	t.Run("openrouter-preset", func(t *testing.T) { testStockTaskLifecycle(t, "openrouter", false) })
+	t.Run("openrouter-remote", func(t *testing.T) { testStockTaskLifecycle(t, "openrouter", true) })
 }
 func testStockTaskLifecycle(t *testing.T, provider string, remote bool) {
 	custom := provider != ""
 	expectedModel := "openai/gpt-5.6-sol"
-	if provider == "modal" {
-		expectedModel = "fixture.us-west.modal.direct"
+	if provider == "openrouter" {
+		expectedModel += "@preset/codex-tasks"
 	}
 	binary := os.Getenv("CODEX_TASKS_TEST_CODEX")
 	if !filepath.IsAbs(binary) {
@@ -77,7 +77,7 @@ func testStockTaskLifecycle(t *testing.T, provider string, remote bool) {
 		body, _ := io.ReadAll(io.LimitReader(r.Body, 4<<20))
 		mu.Lock()
 		requests = append(requests, string(body))
-		toolCall := provider == "modal" && len(requests) == 1
+		toolCall := provider == "openrouter" && len(requests) == 1
 		mu.Unlock()
 		w.Header().Set("Content-Type", "text/event-stream")
 		item := map[string]any{"id": "msg-test", "type": "message", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": "done"}}}
@@ -192,11 +192,11 @@ args = ["-c", "printf fake-command-key"]
 	o.Model = "" // Use the effective configured model and reasoning.
 	if custom {
 		o.ModelProvider = provider
-		o.Model = expectedModel
+		o.Model = "openai/gpt-5.6-sol"
 		o.ContextWindow = 32000
 	}
 	expectedEffort := "high"
-	if provider == "modal" {
+	if provider == "openrouter" {
 		o.ReasoningEffort = "low"
 		expectedEffort = "low"
 	}
@@ -341,7 +341,7 @@ args = ["-c", "printf fake-command-key"]
 	captured := append([]string(nil), requests...)
 	mu.Unlock()
 	wantRequests := 2
-	if provider == "modal" {
+	if provider == "openrouter" {
 		wantRequests++
 		if len(captured) < 2 || !strings.Contains(captured[1], "function_call_output") {
 			t.Fatal("missing mock tool continuation")
@@ -358,7 +358,7 @@ args = ["-c", "printf fake-command-key"]
 			} `json:"reasoning"`
 		}
 		if err := json.Unmarshal([]byte(payload), &request); err != nil || request.Model != expectedModel {
-			t.Fatalf("request %d lost model: %s", i, payload)
+			t.Fatalf("request %d lost preset/model: %s", i, payload)
 		}
 		if request.Reasoning.Effort != expectedEffort {
 			t.Fatalf("request %d lost reasoning effort: %s", i, payload)
@@ -377,7 +377,7 @@ args = ["-c", "printf fake-command-key"]
 	if fork.Task.ID == id || fork.Task.ProjectID != created.Task.ProjectID || fork.Task.Model != expectedModel {
 		t.Fatalf("fork lost identity/project: %+v", fork)
 	}
-	if provider == "modal" {
+	if provider == "openrouter" {
 		mode := opts("mode", fork.Task.ID)
 		mode.Mode = "default"
 		var changed Result

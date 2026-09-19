@@ -31,7 +31,7 @@ case "$1" in
         printf '%s\n' '{"outcome":"failed","error":"Setup failed; inspect worktree","worktree":"/tmp/retained-fixture","setup_status":"failed"}'; exit 1 ;;
       images)
         case " $* " in *' --image /tmp/fixture.png '*) ;; *) exit 9;; esac
-        case " $* " in *' --model-provider modal --model fixture/model --model-context-window 32000 '*) ;; *) exit 9;; esac
+        case " $* " in *' --model-provider openrouter --model fixture/model --model-context-window 32000 '*) ;; *) exit 9;; esac
         printf '%s\n' '{"input_accepted":true,"task":{"id":"image-id"}}' ;;
       background)
         case " $* " in *' --reasoning-effort'*) exit 9;; esac
@@ -39,7 +39,7 @@ case "$1" in
         printf '%s\n' '{"input_accepted":true,"task":{"id":"background-id"}}' ;;
       foreground)
         case " $* " in *' --reasoning-effort low '*) ;; *) exit 9;; esac
-        case " $* " in *' --model-provider modal --model test/model --model-context-window 32000 '*) ;; *) exit 9;; esac
+        case " $* " in *' --model-provider openrouter --model test/model --model-context-window 32000 '*) ;; *) exit 9;; esac
         case " $* " in *' --wait-history '*) ;; *) exit 9;; esac
         printf '%s\n' '{"input_accepted":true,"history_ready":true,"task":{"id":"foreground-id"}}' ;;
       failed) printf '%s\n' '{"outcome":"failed","error":"Rejected before creation"}'; exit 1 ;;

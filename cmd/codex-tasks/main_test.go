@@ -25,7 +25,7 @@ func TestModelsWithoutTaskConfiguration(t *testing.T) {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "modal-models.json"), []byte(`{"metadata_version":1,"models":[{"id":"test/model","name":"Test","context_length":32000}],"refreshed_at":"2026-09-18T00:00:00Z"}`), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "openrouter-models.json"), []byte(`{"metadata_version":1,"models":[{"id":"test/model","name":"Test","context_length":32000}],"refreshed_at":"2026-09-18T00:00:00Z"}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("CODEX_TASKS_MODELS_TEST_PROCESS", "1")
