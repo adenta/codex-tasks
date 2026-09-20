@@ -11,6 +11,16 @@ func render(w io.Writer, r Result, asJSON bool) {
 		_ = json.NewEncoder(w).Encode(r)
 		return
 	}
+	if r.Action == "models" && r.Error == "" {
+		fmt.Fprintf(w, "Default: %s / %s\n", clean(r.DefaultProvider, 128), clean(r.DefaultModel, 512))
+		for _, m := range r.Models {
+			fmt.Fprintf(w, "%s\t%s\t%d\n", clean(m.ID, 512), clean(m.Name, 512), m.ContextLength)
+		}
+		if r.Warning != "" {
+			fmt.Fprintln(w, r.Warning)
+		}
+		return
+	}
 	location := clean(r.Host, 80) + "/" + clean(r.Account, 80)
 	if r.Action == "environments" && r.Error == "" {
 		if len(r.Environments) == 0 {

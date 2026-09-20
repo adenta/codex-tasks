@@ -31,6 +31,10 @@ Item {
   property string host: settings.host
   property string projectId: ""
   property string inference: ""
+  property string defaultModel: ""
+  property string defaultProvider: ""
+  property string subscriptionModel: ""
+  readonly property string defaultLabel: defaultModel ? "Server default · "+defaultModel : "Server default"
   property string reasoningEffort: ""
   onInferenceChanged: reasoningEffort=""
   readonly property var effortOptions: Inference.effortOptions(inferenceModel)
@@ -77,7 +81,7 @@ Item {
   }
   readonly property var selectedProject: projects.find(function(p) { return p.id === root.projectId }) || null
   readonly property bool validServer: servers.some(function(s) { return s.value === root.host })
-  readonly property bool canSend: !busy && !pasting && !uncertain && environmentReady && validServer && (!inference || inferenceModel!==null) && (message.trim().length > 0 || images.length > 0) && (projectId === "" || (selectedProject !== null && !selectedProject.unavailable))
+  readonly property bool canSend: !busy && !pasting && !uncertain && environmentReady && validServer && (!inference || (inference==="@subscription" ? subscriptionModel!=="" : inferenceModel!==null)) && (message.trim().length > 0 || images.length > 0) && (projectId === "" || (selectedProject !== null && !selectedProject.unavailable))
   readonly property var projectOptions: {
     var list = [{value:"", label:"No project"}]
     projects.forEach(function(p) { list.push({value:p.id,label:(p.name || p.id) + (p.unavailable ? " (unavailable)" : "")}) })
@@ -90,13 +94,13 @@ Item {
     property string host: "grace"
     property string mode: "worktree"
     property string cache: "{}"
-    property string favorites: "[]"
+    property string modalFavorites: "[]"
     property string environments: "{}"
   }
   Component.onCompleted: {
     try { cache=JSON.parse(settings.cache) } catch(e) {}
     try { environmentMemory=JSON.parse(settings.environments) || {} } catch(e) {}
-    try { var saved=JSON.parse(settings.favorites);if(Array.isArray(saved))favorites=saved.filter(function(v,i,a){return typeof v==="string"&&a.indexOf(v)===i}) } catch(e) {}
+    try { var saved=JSON.parse(settings.modalFavorites);if(Array.isArray(saved))favorites=saved.filter(function(v,i,a){return typeof v==="string"&&a.indexOf(v)===i}) } catch(e) {}
   }
   function remember() {
     settings.host=host; settings.mode=mode
@@ -150,7 +154,7 @@ Item {
     clipboardProcess.running=true
   }
   function changeHost(value) {
-    host=value;projectId="";remember();status="";refresh()
+    host=value;projectId="";inference="";inferenceModels=[];defaultModel="";defaultProvider="";subscriptionModel="";remember();status="";refresh();refreshCatalog(false)
   }
   function chooseEnvironment(value) {
     environment=value
@@ -192,33 +196,38 @@ Item {
   function toggleFavorite(id) {
     var next=favorites.slice(),i=next.indexOf(id)
     if(i>=0)next.splice(i,1);else next.push(id)
-    favorites=next;settings.favorites=JSON.stringify(next)
+    favorites=next;settings.modalFavorites=JSON.stringify(next)
   }
   function refreshCatalog(force) {
     if(catalogProcess.running)return
-    var args=[cli,"models","--json"]
+    catalogProcess.fetchHost=host
+    var args=[cli,"models","--host",host,"--json"]
     if(force)args.push("--refresh")
     catalogProcess.command=args
     catalogProcess.running=true
   }
   Process {
     id:catalogProcess
+    property string fetchHost: ""
     stdout:StdioCollector { id:catalogOutput }
     onExited:function(code) {
       try {
+        if(catalogProcess.fetchHost!==root.host){Qt.callLater(function(){root.refreshCatalog(false)});return}
         var data=JSON.parse(catalogOutput.text)
         if(code!==0||data.error)throw new Error(data.error||"Catalog unavailable")
-        if(!Array.isArray(data.models)||!data.models.length)throw new Error("Catalog is empty")
-        root.inferenceModels=data.models;root.catalogRefreshedAt=data.refreshed_at||"";root.catalogWarning=data.warning||""
-      }catch(e){root.catalogWarning="Could not refresh models. "+(root.inferenceModels.length?"Showing cached models.":"Subscription is available.")}
+        root.defaultModel=data.default_model||"";root.defaultProvider=data.default_provider||"";root.subscriptionModel=data.subscription_model||""
+        root.inferenceModels=data.models||[];root.catalogRefreshedAt=data.refreshed_at||"";root.catalogWarning=data.warning||""
+      }catch(e){root.catalogWarning="Could not refresh models. "+(root.inferenceModels.length?"Showing cached models.":"Server default is available.")}
     }
   }
   function send(background) {
     if (!canSend) return
+    if(images.length && inferenceModel && inferenceModel.input_modalities && inferenceModel.input_modalities.indexOf("image")<0){status="This model does not advertise image input. Choose an image-capable model.";return}
     var args=[cli,"create","--host",host,"--message-file","-","--json"]
     images.forEach(function(item){args.push("--image",item.path)})
     if (!background) args.push("--wait-history")
-    if(inferenceModel)args.push("--model-provider","openrouter","--model",inferenceModel.id,"--model-context-window",String(inferenceModel.context_length))
+    if(inference==="@subscription")args.push("--model-provider","openai","--model",subscriptionModel)
+    if(inferenceModel)args.push("--model-provider","modal","--model",inferenceModel.id,"--model-context-window",String(inferenceModel.context_length))
     if(inferenceModel && reasoningEffort)args.push("--reasoning-effort",reasoningEffort)
     if(usesNewWorktree && environment)args.push("--environment",environment)
     if(projectId) {

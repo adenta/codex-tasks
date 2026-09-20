@@ -14,13 +14,14 @@ import (
 	"time"
 
 	"github.com/adenta/codex-tasks/internal/buildinfo"
+	"github.com/adenta/codex-tasks/internal/catalog"
 	"github.com/adenta/codex-tasks/internal/endpoints"
 	"github.com/google/uuid"
 )
 
 const maxMessage = 1 << 20
 const help = `Usage: codex-tasks OPERATION [TASK] [OPTIONS]
-  models [--json] [--refresh]
+  models [--host HOST | --target HOST/ACCOUNT] [--json] [--refresh]
   environments --cwd DIRECTORY
   find --query TEXT [--archive all|active|archived] [--limit N] [--cursor CURSOR]
   projects | list [--project ID] [--archived] [--limit N] [--cursor CURSOR]
@@ -43,6 +44,7 @@ Native desktop task tools remain necessary for desktop-only targets and handoff.
 `
 
 type Options struct {
+	Refresh         bool          `json:"refresh,omitempty"`
 	ReasoningEffort string        `json:"reasoning_effort,omitempty"`
 	Environment     string        `json:"environment,omitempty"`
 	WaitHistory     bool          `json:"wait_history,omitempty"`
@@ -98,6 +100,7 @@ func parse(args []string, stdin io.Reader) (Options, error) {
 	o := Options{Action: args[0], OperationID: uuid.NewString()}
 	fs := flag.NewFlagSet("tasks "+o.Action, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
+	fs.BoolVar(&o.Refresh, "refresh", false, "refresh the selected server model catalog")
 	fs.StringVar(&o.Host, "host", "", "configured host")
 	fs.StringVar(&o.Target, "target", "", "local or host/account")
 	fs.StringVar(&o.Query, "query", "", "task link, ID, or title/preview words")
@@ -156,6 +159,7 @@ func parse(args []string, stdin io.Reader) (Options, error) {
 		o.TaskID = fs.Arg(0)
 	}
 	allowed := map[string]string{
+		"models":       "refresh",
 		"environments": "cwd",
 		"find":         "query archive limit cursor", "projects": "limit cursor", "list": "project archived limit cursor", "read": "turn limit cursor item offset max-chars include-outputs",
 		"create": "cwd project projectless checkout ref environment title model model-provider model-context-window reasoning-effort mode message-file image wait wait-history", "fork": "title mode",
@@ -297,7 +301,7 @@ func validate(o Options) error {
 		}
 	}
 	switch o.Action {
-	case "find", "projects", "list", "create", "activity", "environments":
+	case "find", "projects", "list", "create", "activity", "environments", "models":
 		if o.TaskID != "" {
 			return fmt.Errorf("%s does not accept a positional task ID", o.Action)
 		}
@@ -419,6 +423,14 @@ func run(ctx context.Context, paths endpoints.Config, o Options, stdout, stderr 
 		actionErr = discover(opCtx, paths, o, &r, executeAt)
 	} else {
 		actionErr = executeAt(opCtx, paths, o, &r)
+	}
+	if o.Action == "models" && actionErr != nil && r.ErrorCategory == "transport_unavailable" {
+		if cached, err := catalog.ReadCache(modelCachePath(r.Host, r.Account)); err == nil {
+			r.Models = cached.Models
+			r.RefreshedAt = &cached.RefreshedAt
+			r.Warning = "Server unavailable; showing cached Modal models. Defaults unavailable."
+			actionErr = nil
+		}
 	}
 	setError(&r, actionErr)
 	e.Event, e.Timestamp, e.Outcome = "task_operation_outcome", float64(time.Now().UnixNano())/1e9, r.Outcome

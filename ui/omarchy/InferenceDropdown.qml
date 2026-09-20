@@ -6,11 +6,9 @@ import "Inference.js" as Inference
 
 Item {
   id: control
-  // Keep the slug aligned with internal/tasks/provider.go.
-  readonly property string presetSlug: "codex-tasks"
-  readonly property string presetUUID: "f9b96265-c3b7-4ec0-b9dd-6f7a7c13ab5f"
-  readonly property string presetURL: "https://openrouter.ai/workspaces/default/presets/" + presetUUID
   property string value: ""
+  property string defaultLabel: "Server default"
+  property bool subscriptionAvailable: false
   property var models: []
   property var favorites: []
   property bool refreshing: false
@@ -30,7 +28,7 @@ Item {
     Text { text:"Inference";color:Color.popups.text;font.family:Style.font.family;font.pixelSize:Style.font.caption;font.bold:true }
     Button {
       id:trigger;width:parent.width;height:Style.spacing.controlHeight
-      tooltipText:control.value ? (control.selected ? control.selected.name : "Unavailable model") : "Subscription"
+      tooltipText:control.value === "@subscription" ? "Subscription" : control.value ? (control.selected ? control.selected.name : "Unavailable model") : control.defaultLabel
       bordered:true;focusable:true;foreground:Color.popups.text
       Text {
         objectName:"inferenceSelectedLabel"
@@ -57,24 +55,24 @@ Item {
         contentItem:Column {
           spacing:Style.space(6)
           Button {
-            id:subscription;width:parent.width;leftAlign:true;foreground:Color.popups.text;text:"Subscription"+(control.value===""?"   ✓":"");focusable:true
-            tooltipText:"Use your current Codex subscription model"
+            id:serverDefault;width:parent.width;leftAlign:true;foreground:Color.popups.text;text:control.defaultLabel+(control.value===""?"   ✓":"");focusable:true
+            tooltipText:"Use the selected server’s configured model and provider"
             onClicked:control.choose("")
           }
-          Text { text:"Use your current Codex model";color:Qt.alpha(Color.popups.text,0.65);font.family:Style.font.family;font.pixelSize:Style.font.caption;leftPadding:Style.space(10) }
+          Button { id:subscription;width:parent.width;leftAlign:true;foreground:Color.popups.text;text:"Subscription"+(control.value==="@subscription"?"   ✓":"");focusable:true;enabled:control.subscriptionAvailable;onClicked:control.choose("@subscription") }
           Rectangle { width:parent.width;height:1;color:Qt.alpha(Color.popups.text,0.25) }
           Row {
             width:parent.width;spacing:Style.space(4)
             TextField {
               id:search;width:parent.width-refreshButton.width-parent.spacing
-              placeholderText:"Search models…";font.family:Style.font.family;font.pixelSize:Style.font.body
+              placeholderText:"Search Modal models…";font.family:Style.font.family;font.pixelSize:Style.font.body
               onTextChanged:results.currentIndex=-1
               Keys.onDownPressed: { if(results.count){results.currentIndex=0;results.forceActiveFocus()} }
               Keys.onUpPressed:subscription.forceActiveFocus()
               Keys.onReturnPressed: { if(results.count&&!control.filtered[0].unavailable)control.choose(control.filtered[0].id) }
               Keys.onEnterPressed: { if(results.count&&!control.filtered[0].unavailable)control.choose(control.filtered[0].id) }
             }
-            Button { id:refreshButton;width:Style.space(32);height:Style.spacing.controlHeight;text:"↻";focusable:true;enabled:!control.refreshing;tooltipText:"Refresh models";onClicked:control.refreshRequested() }
+            Button { id:refreshButton;width:Style.space(32);height:Style.spacing.controlHeight;text:"↻";focusable:true;enabled:!control.refreshing;tooltipText:"Refresh Modal models";onClicked:control.refreshRequested() }
           }
           ListView {
             id:results;width:parent.width;height:Math.min(contentHeight,Style.space(240));clip:true
@@ -120,21 +118,6 @@ Item {
           Text { width:parent.width;text:control.refreshing?"Refreshing…":control.warning || (control.refreshedAt?"Updated "+new Date(control.refreshedAt).toLocaleString():"Refresh to load models");wrapMode:Text.Wrap;color:Qt.alpha(Color.popups.text,0.65);font.family:Style.font.family;font.pixelSize:Style.font.caption }
         }
       }
-    }
-    QQC.Label {
-      objectName:"inferencePresetDescription"
-      visible:control.value!=="";width:parent.width
-      text:'<a href="'+control.presetURL+'">@preset/'+control.presetSlug+'</a>'
-      textFormat:Text.StyledText;wrapMode:Text.Wrap
-      color:Color.popups.text;linkColor:Color.accent
-      font.family:Style.font.family;font.pixelSize:Style.font.caption
-      font.underline:activeFocus
-      activeFocusOnTab:true
-      Accessible.name:"Open preset " + control.presetSlug
-      onLinkActivated:Qt.openUrlExternally(control.presetURL)
-      Keys.onReturnPressed:Qt.openUrlExternally(control.presetURL)
-      Keys.onSpacePressed:Qt.openUrlExternally(control.presetURL)
-      HoverHandler { cursorShape:Qt.PointingHandCursor }
     }
   }
 }

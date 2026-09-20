@@ -49,7 +49,7 @@ unlike launcher.ini. Reloading clears the in-memory draft; its abandoned files
 are subject to that same expiry. No background cleanup service is added.
 The server, Git execution choice, and cached project lists
 are stored in `~/.config/codex-tasks/launcher.ini`. Prompt text is never stored.
-Each fresh composer starts with no project, like the Subscription model default;
+Each fresh composer starts with no project, like the Server default inference choice;
 changing servers also clears the project selection. Grace is the first-run server.
 A missing server requires explicit
 selection; destinations are never silently substituted.
@@ -106,30 +106,25 @@ Git; non-Git folders run directly. Desktop state is never modified.
 ## Inference
 
 The Inference selector shares the Server/Project row. Each fresh composer starts
-with Subscription (no model/provider override). The dropdown pins Subscription,
-then favorites, then remaining models alphabetically. Search matches name or ID;
-star buttons save local favorites independently of the model catalog. Missing
-favorites stay visible but disabled. Space toggles a favorite when navigating
-results with the arrow keys.
+with Server default (no model/provider override), reflecting the selected server's
+TOML configuration. Subscription is an explicit OpenAI provider choice. The dropdown
+then shows favorites and remaining models alphabetically. Search matches name or
+ID; stars save local favorites. Missing favorites remain visible but disabled.
+Space toggles a favorite while navigating results with arrow keys.
 
-Selecting an OpenRouter model shows an `@preset/codex-tasks` link below the
-selector. It opens the preset's OpenRouter settings. The slug and settings UUID
-are fixed constants, not launcher preferences; the CLI applies the preset to
-the model ID. Subscription mode hides the link.
+The installed CLI supplies defaults and models through
+`models --host HOST --json`. Catalog requests pass through the selected server's
+loopback proxy; the desktop needs no Modal credentials. The catalog cache is scoped
+by host/account. Opening reuses it; refresh explicitly updates it. Defaults are
+read afresh. Changing servers clears the selection and ignores stale responses.
+Failures retain cached models with a warning; catalog reads never run inference.
+Modal favorites are stored separately from previous OpenRouter favorites.
 
-The installed `codex-tasks` binary supplies the catalog through `models --json`;
-no separate helper is required. It reads the public OpenRouter catalog and keeps
-an atomic cache at `$XDG_CACHE_HOME/codex-tasks/openrouter-models.json` (default
-`~/.cache/codex-tasks/openrouter-models.json`). Opening uses that cache, fetching
-when it is missing or invalid; the refresh button explicitly updates it.
-Failure preserves cached models and subscription access. Catalog requests time
-out after 15 seconds and do not handle credentials or route inference.
-
-The destination account must already have a configured `openrouter` provider.
+The destination account must already have a configured `modal` Responses provider.
 Selecting a model passes its ID, provider, and advertised context size through
 `codex-tasks create` and the stock app-server API. No automatic provider fallback or
 resubmission occurs. Ordinary subscription tasks and Credits are unchanged.
 
-For OpenRouter models, the Effort selector offers Default and advertised reasoning
+For Modal models, the Effort selector offers Default and advertised reasoning
 levels. Default preserves destination configuration. Fresh drafts and model changes
 reset it; failed submissions retain it. It uses the stock app-server interface.

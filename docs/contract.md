@@ -68,21 +68,25 @@ Failure categories include `route_unavailable`, `unsupported_operation`,
 invalid arguments; 3 means an uncertain mutation. Inspect side-effect flags and
 known IDs before retrying. No mutation is replayed automatically.
 
-## Public model catalog
+## Modal model catalog
 
-`models --json [--refresh]` is a local catalog command and does not use the task
-result envelope or remote dispatch. Successful results contain `models` (each
-with `id`, `name`, and positive `context_length`), an RFC 3339 `refreshed_at`, and
-an optional `warning`. Models are deduplicated and sorted by ID; missing names
-use the ID. Entries without an ID or positive context length are skipped.
+`models --host HOST --json [--refresh]` uses the normal task result envelope and
+verified stock-server routing. It reports `default_model`, `default_provider`,
+`subscription_model`, `models`, `refreshed_at`, and optional `warning`.
+Catalog entries include ID, name, positive context length, advertised input
+modalities and reasoning efforts. Missing names use the ID; invalid and duplicate
+entries are skipped. Modal effort options become `reasoning.supported_efforts`.
 
-The catalog uses the public [OpenRouter models API](https://openrouter.ai/docs/api/api-reference/models/get-models).
-Requests have a 15-second timeout and responses/cache reads are limited to 16 MiB.
-A valid cache is reused until an explicit refresh. Missing or invalid caches
-trigger fetching. Refresh failure returns valid cached data with a warning and
-exit 0; failure without usable data returns `{"error":"..."}` and exit 1.
-A cache write failure returns fetched data with a warning. Invalid arguments
-produce stderr diagnostics and exit 2. No task or inference request is made.
+The selected server's configured loopback Modal proxy serves the catalog through
+stock command/exec. No credentials are read by the CLI. Catalog curl requests have
+a 15-second timeout and a 2 MiB command-output cap; cache decoding is limited to
+16 MiB. Cache files are scoped by host/account under
+`$XDG_CACHE_HOME/codex-tasks/modal-HOST-ACCOUNT.json` (default `~/.cache`).
+A valid catalog is reused until explicit refresh; server defaults are always read.
+Refresh failure preserves valid cached models with a warning. If the proxy is
+unavailable without a cache, server defaults remain usable with a warning.
+A disconnected server can return cached models with a warning but no defaults;
+identity mismatches remain errors. Catalog requests never run inference.
 
 ## Examples
 

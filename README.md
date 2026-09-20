@@ -163,25 +163,37 @@ See [migration and validation notes](docs/migration.md). Extracted from
 [adenta/codex-ops](https://github.com/adenta/codex-ops), snapshot
 `ef47c97e74086501019f76671e140c9a5abaf3fa`.
 
-## OpenRouter routing
+## Modal inference
 
-New tasks explicitly using `--model-provider openrouter` keep the selected model
-and automatically use the shared OpenRouter preset, for example
-`deepseek/deepseek-v4.1-flash@preset/codex-tasks`. The invoking CLI applies this
-once; matching suffixes are accepted and other preset suffixes are rejected.
-The preset must exist in the workspace accessible to that host's API key.
-Manage its routing preferences on OpenRouter: updates affect subsequent requests,
-including existing preset-qualified tasks. Rules apply to every model using it.
-Missing-preset or inference errors never cause a retry with the plain model.
-Subscription, other providers, and existing plain-model tasks are unchanged.
-No launcher configuration or gateway is needed. To rename the shared preset,
-change `openRouterPreset` in the CLI source and update the invoking client.
+New tasks selected from the launcher use the configured `modal` provider and
+Modal's endpoint hostname as the model ID. No routing preset is appended.
+Server default inherits the selected server's TOML model/provider. Subscription
+explicitly selects the OpenAI provider and the server's subscription model.
+The model and provider remain explicit when forking a task.
+
+On Grace, the configured provider points at a separate loopback HTTP proxy:
+
+```toml
+[model_providers.modal]
+name = "Modal"
+base_url = "http://127.0.0.1:48765/v1"
+wire_api = "responses"
+requires_openai_auth = false
+supports_websockets = false
+```
+
+The proxy owns upstream credentials and reviewer alias translation. It is deployed
+separately; codex-tasks does not manage providers, services, credentials or billing.
+Existing tasks are not migrated or silently rerouted.
 
 ## Optional Omarchy popup
 
-The public OpenRouter catalog is built into `codex-tasks models --json`.
-Use `--refresh` to update it explicitly; otherwise a valid local cache is reused.
-Catalog access requires no endpoint configuration, credentials, or Ops helper.
+`codex-tasks models --host grace --json` reads the selected stock server's
+configuration and retrieves the catalog from its configured local Modal proxy
+through command/exec. The desktop holds no Modal credentials. `--refresh` updates
+an account-scoped local catalog cache; server defaults are read afresh. A transport
+failure can return cached models with a warning, but cannot invent server defaults.
+Help works offline. Catalog requests never run inference.
 See `codex-tasks help models` for cache location and failure behavior.
 
 See [ui/omarchy](ui/omarchy/README.md) for a themed remote task composer and an
@@ -195,6 +207,6 @@ executing account's Documents/Codex, with work/outputs and developer instruction
 accepted input before returning `history_ready: true`; this does not wait for
 inference completion.
 
-OpenRouter models with advertised reasoning levels expose an Effort selector.
+Modal models with advertised reasoning levels expose an Effort selector.
 Default preserves the server's configured behavior. `create --reasoning-effort`
 sets and verifies the selected value through the stock app-server interface.

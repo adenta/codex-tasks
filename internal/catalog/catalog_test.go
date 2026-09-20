@@ -19,7 +19,7 @@ func TestCatalogCacheLifecycle(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		if r.Header.Get("Authorization") != "" {
-			t.Error("unexpected credentials")
+			t.Error("missing proxy authentication")
 		}
 		if fail {
 			http.Error(w, "unavailable", 503)
@@ -108,24 +108,6 @@ func TestInvalidCacheAndSaveFailure(t *testing.T) {
 	}
 }
 
-func TestRunCachedAndInvalidArguments(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("XDG_CACHE_HOME", dir)
-	path := filepath.Join(dir, "codex-tasks", "openrouter-models.json")
-	if err := writeCache(path, Result{MetadataVersion: 1, Models: []Model{{ID: "a", Name: "Alpha", ContextLength: 10}}, RefreshedAt: time.Now().UTC()}); err != nil {
-		t.Fatal(err)
-	}
-	var out, stderr bytes.Buffer
-	if code := Run([]string{"--json"}, &out, &stderr); code != 0 || !strings.Contains(out.String(), `"context_length":10`) {
-		t.Fatalf("%d %s %s", code, &out, &stderr)
-	}
-	for _, args := range [][]string{{"--host", "remote"}, {"unexpected"}} {
-		if code := Run(args, &out, &stderr); code != 2 {
-			t.Fatalf("invalid args accepted: %v", args)
-		}
-	}
-}
-
 func TestLegacyMetadataRefresh(t *testing.T) {
 	for _, fail := range []bool{false, true} {
 		t.Run(fmt.Sprint(fail), func(t *testing.T) {
@@ -140,7 +122,7 @@ func TestLegacyMetadataRefresh(t *testing.T) {
 					http.Error(w, "down", 503)
 					return
 				}
-				w.Write([]byte(`{"data":[{"id":"a","context_length":10,"reasoning":{"supported_efforts":["max","low"]}}]}`))
+				w.Write([]byte(`{"data":[{"id":"a","context_length":10,"reasoning_options":[{"type":"effort","values":["max","low"]}]}]}`))
 			}))
 			defer server.Close()
 			for i := 0; i < 2; i++ {
@@ -157,4 +139,19 @@ func TestLegacyMetadataRefresh(t *testing.T) {
 			}
 		})
 	}
+}
+
+func load(ctx context.Context, client *http.Client, url, path string, refresh bool) (Result, error) {
+	return Load(ctx, path, refresh, func(ctx context.Context) (Result, error) {
+		req, _ := http.NewRequestWithContext(ctx, "GET", url, nil)
+		r, err := client.Do(req)
+		if err != nil {
+			return Result{}, err
+		}
+		defer r.Body.Close()
+		if r.StatusCode != 200 {
+			return Result{}, fmt.Errorf("HTTP %d", r.StatusCode)
+		}
+		return Parse(r.Body)
+	})
 }

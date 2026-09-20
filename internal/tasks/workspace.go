@@ -161,11 +161,6 @@ func (s *service) workspace(ctx context.Context, o Options) (string, bool, error
 }
 
 func (s *service) create(ctx context.Context, o Options, r *Result) error {
-	model, err := creationModel(o.ModelProvider, o.Model)
-	if err != nil {
-		return err
-	}
-	o.Model = model
 	var environment *environmentConfig
 	if o.Environment != "" {
 		isGit, err := s.environmentRepository(ctx, o.CWD)

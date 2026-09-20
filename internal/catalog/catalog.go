@@ -1,13 +1,11 @@
-// Package catalog provides credential-free OpenRouter model discovery.
+// Package catalog provides Modal model decoding and account-scoped caching.
 package catalog
 
 import (
 	"context"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -15,7 +13,6 @@ import (
 	"time"
 )
 
-const endpoint = "https://openrouter.ai/api/v1/models"
 const maxBytes = 16 << 20
 
 type Reasoning struct {
@@ -23,10 +20,11 @@ type Reasoning struct {
 }
 
 type Model struct {
-	Reasoning     *Reasoning `json:"reasoning,omitempty"`
-	ID            string     `json:"id"`
-	Name          string     `json:"name"`
-	ContextLength int        `json:"context_length"`
+	Reasoning       *Reasoning `json:"reasoning,omitempty"`
+	ID              string     `json:"id"`
+	Name            string     `json:"name"`
+	ContextLength   int        `json:"context_length"`
+	InputModalities []string   `json:"input_modalities,omitempty"`
 }
 
 type Result struct {
@@ -66,7 +64,7 @@ func decode(r io.Reader, target any) error {
 	return json.Unmarshal(data, target)
 }
 
-func readCache(path string) (Result, error) {
+func ReadCache(path string) (Result, error) {
 	var result Result
 	f, err := os.Open(path)
 	if err != nil {
@@ -88,7 +86,7 @@ func writeCache(path string, result Result) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return err
 	}
-	f, err := os.CreateTemp(filepath.Dir(path), ".openrouter-models-*")
+	f, err := os.CreateTemp(filepath.Dir(path), ".modal-models-*")
 	if err != nil {
 		return err
 	}
@@ -103,28 +101,34 @@ func writeCache(path string, result Result) error {
 	return os.Rename(f.Name(), path)
 }
 
-func fetch(ctx context.Context, client *http.Client, url string) (Result, error) {
+// Parse decodes Modal endpoint metadata without handling credentials.
+func Parse(r io.Reader) (Result, error) {
 	var result Result
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return result, err
-	}
-	req.Header.Set("Accept", "application/json")
-	resp, err := client.Do(req)
-	if err != nil {
-		return result, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return result, fmt.Errorf("catalog HTTP status %d", resp.StatusCode)
-	}
 	var payload struct {
-		Data []Model `json:"data"`
+		Data []struct {
+			Model
+			ReasoningOptions []struct {
+				Type   string   `json:"type"`
+				Values []string `json:"values"`
+			} `json:"reasoning_options"`
+		} `json:"data"`
 	}
-	if err = decode(resp.Body, &payload); err != nil {
+	if err := decode(r, &payload); err != nil {
 		return result, fmt.Errorf("invalid catalog: %w", err)
 	}
-	result.Models = normalize(payload.Data)
+	models := make([]Model, 0, len(payload.Data))
+	for _, raw := range payload.Data {
+		m := raw.Model
+		m.Reasoning = nil
+		for _, option := range raw.ReasoningOptions {
+			if option.Type == "effort" {
+				m.Reasoning = &Reasoning{SupportedEfforts: option.Values}
+				break
+			}
+		}
+		models = append(models, m)
+	}
+	result.Models = normalize(models)
 	if len(result.Models) == 0 {
 		return result, fmt.Errorf("catalog has no usable models")
 	}
@@ -133,12 +137,12 @@ func fetch(ctx context.Context, client *http.Client, url string) (Result, error)
 	return result, nil
 }
 
-func load(ctx context.Context, client *http.Client, url, path string, refresh bool) (Result, error) {
-	cached, cacheErr := readCache(path)
+func Load(ctx context.Context, path string, refresh bool, fetch func(context.Context) (Result, error)) (Result, error) {
+	cached, cacheErr := ReadCache(path)
 	if cacheErr == nil && cached.MetadataVersion >= 1 && !refresh {
 		return cached, nil
 	}
-	result, err := fetch(ctx, client, url)
+	result, err := fetch(ctx)
 	if err != nil {
 		if cacheErr == nil {
 			cached.Warning = "Could not refresh models; showing cached models: " + err.Error()
@@ -156,48 +160,4 @@ func load(ctx context.Context, client *http.Client, url, path string, refresh bo
 		result.Warning = "Models loaded, but could not save cache: " + err.Error()
 	}
 	return result, nil
-}
-
-// Run handles the local models command independently of task configuration.
-func Run(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("models", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	asJSON := fs.Bool("json", false, "JSON output")
-	refresh := fs.Bool("refresh", false, "refresh the public catalog")
-	if err := fs.Parse(args); err != nil {
-		return 2
-	}
-	if fs.NArg() != 0 {
-		fmt.Fprintln(stderr, "models accepts only --json and --refresh")
-		return 2
-	}
-	dir, err := os.UserCacheDir()
-	var result Result
-	if err == nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		result, err = load(ctx, &http.Client{Timeout: 15 * time.Second}, endpoint, filepath.Join(dir, "codex-tasks", "openrouter-models.json"), *refresh)
-	}
-	if err != nil {
-		if *asJSON {
-			json.NewEncoder(stdout).Encode(map[string]string{"error": err.Error()})
-		} else {
-			fmt.Fprintln(stderr, err)
-		}
-		return 1
-	}
-	if *asJSON {
-		if err = json.NewEncoder(stdout).Encode(result); err != nil {
-			fmt.Fprintln(stderr, err)
-			return 1
-		}
-	} else {
-		for _, m := range result.Models {
-			fmt.Fprintf(stdout, "%s\t%s\t%d\n", m.ID, m.Name, m.ContextLength)
-		}
-		if result.Warning != "" {
-			fmt.Fprintln(stderr, result.Warning)
-		}
-	}
-	return 0
 }

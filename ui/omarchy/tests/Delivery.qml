@@ -36,26 +36,31 @@ ShellRoot {
         app.reasoningEffort="low"
         check(app.servers.some(function(s){return s.value==="workstation" && s.label==="local"}), "local target missing")
         app.changeHost("workstation")
+        check(app.inference==="" && app.inferenceModels.length===0,"server change retained model")
+        break
+      case 2:
         check(openedTasks===0 && notices===1 && lastSuccess, "background opened Codex or did not notify")
         check(app.message==="" && app.taskId==="background-id", "background delivery not recorded")
+        check(app.reasoningEffort==="", "server change retained effort")
+        app.inference="test/model";app.reasoningEffort="low"
         app.opened=true;app.message="foreground";app.send(false)
         check(app.opened && app.busy, "foreground hid before acceptance")
         app.open("{}")
         check(app.reasoningEffort==="low", "pending submission lost effort")
         break
-      case 2:
+      case 3:
         check(openedTasks===1 && notices===1 && !app.opened, "foreground did not open exactly once")
         app.inference="test/model";app.reasoningEffort="low"
         app.message="failed";app.send(true)
         break
-      case 3:
+      case 4:
         check(notices===2 && !lastSuccess && app.recoveryPending && !app.uncertain, "known failure not retained")
         app.open("{}")
         check(app.reasoningEffort==="low", "failure lost effort")
         check(app.message==="failed" && app.canSend, "known failure lost recovery")
         app.message="uncertain";app.send(true)
         break
-      case 4:
+      case 5:
         check(notices===3 && !lastSuccess && app.recoveryPending && app.uncertain, "unknown delivery not retained")
         app.open("{}")
         check(app.message==="uncertain" && !app.canSend, "uncertain delivery allows duplicate")
@@ -65,6 +70,10 @@ ShellRoot {
         app.inference="";check(app.reasoningEffort==="", "model switch retained effort")
         app.inference="test/model";app.reasoningEffort="high";app.open("{}")
         check(app.reasoningEffort==="", "fresh draft retained effort")
+        app.inference="@subscription";app.message="subscription";app.send(true)
+        break
+      case 6:
+        check(lastSuccess && app.taskId==="subscription-id", "explicit subscription failed")
         console.log("DELIVERY_FIXTURE_PASS");Qt.quit()
       }
     }

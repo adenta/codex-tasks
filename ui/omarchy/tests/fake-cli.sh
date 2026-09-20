@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 case "$1" in
-  models) printf '%s\n' '{"models":[{"id":"test/model","name":"Test model","context_length":32000,"reasoning":{"supported_efforts":["high","low"]}}],"refreshed_at":"2026-09-18T00:00:00Z"}' ;;
+  models) printf '%s\n' '{"default_model":"gpt-6-astra","default_provider":"openai","subscription_model":"gpt-6-astra","models":[{"id":"test/model","name":"Test model","context_length":32000,"reasoning":{"supported_efforts":["high","low"]}}],"refreshed_at":"2026-09-18T00:00:00Z"}' ;;
   _clipboard-image|_import-image)
     sleep 0.1
     case "$0" in
@@ -31,15 +31,19 @@ case "$1" in
         printf '%s\n' '{"outcome":"failed","error":"Setup failed; inspect worktree","worktree":"/tmp/retained-fixture","setup_status":"failed"}'; exit 1 ;;
       images)
         case " $* " in *' --image /tmp/fixture.png '*) ;; *) exit 9;; esac
-        case " $* " in *' --model-provider openrouter --model fixture/model --model-context-window 32000 '*) ;; *) exit 9;; esac
+        case " $* " in *' --model-provider modal --model fixture/model --model-context-window 32000 '*) ;; *) exit 9;; esac
         printf '%s\n' '{"input_accepted":true,"task":{"id":"image-id"}}' ;;
+      subscription)
+        case " $* " in *' --model-provider openai --model gpt-6-astra ') ;; *' --model-provider openai --model gpt-6-astra '*) ;; *) exit 9;; esac
+        printf '%s\n' '{"input_accepted":true,"task":{"id":"subscription-id"}}' ;;
       background)
+        case " $* " in *' --model-provider '*|*' --model '*) exit 9;; esac
         case " $* " in *' --reasoning-effort'*) exit 9;; esac
         case " $* " in *' --wait-history '*) exit 9;; esac
         printf '%s\n' '{"input_accepted":true,"task":{"id":"background-id"}}' ;;
       foreground)
         case " $* " in *' --reasoning-effort low '*) ;; *) exit 9;; esac
-        case " $* " in *' --model-provider openrouter --model test/model --model-context-window 32000 '*) ;; *) exit 9;; esac
+        case " $* " in *' --model-provider modal --model test/model --model-context-window 32000 '*) ;; *) exit 9;; esac
         case " $* " in *' --wait-history '*) ;; *) exit 9;; esac
         printf '%s\n' '{"input_accepted":true,"history_ready":true,"task":{"id":"foreground-id"}}' ;;
       failed) printf '%s\n' '{"outcome":"failed","error":"Rejected before creation"}'; exit 1 ;;

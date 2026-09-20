@@ -23,14 +23,14 @@ import (
 func TestStockTaskLifecycle(t *testing.T) {
 	t.Run("default-provider", func(t *testing.T) { testStockTaskLifecycle(t, "", false) })
 	t.Run("explicit-command-provider", func(t *testing.T) { testStockTaskLifecycle(t, "command_fixture", false) })
-	t.Run("openrouter-preset", func(t *testing.T) { testStockTaskLifecycle(t, "openrouter", false) })
-	t.Run("openrouter-remote", func(t *testing.T) { testStockTaskLifecycle(t, "openrouter", true) })
+	t.Run("modal-provider", func(t *testing.T) { testStockTaskLifecycle(t, "modal", false) })
+	t.Run("modal-remote", func(t *testing.T) { testStockTaskLifecycle(t, "modal", true) })
 }
 func testStockTaskLifecycle(t *testing.T, provider string, remote bool) {
 	custom := provider != ""
 	expectedModel := "openai/gpt-5.6-sol"
-	if provider == "openrouter" {
-		expectedModel += "@preset/codex-tasks"
+	if provider == "modal" {
+		expectedModel = "fixture.us-west.modal.direct"
 	}
 	binary := os.Getenv("CODEX_TASKS_TEST_CODEX")
 	if !filepath.IsAbs(binary) {
@@ -77,7 +77,7 @@ func testStockTaskLifecycle(t *testing.T, provider string, remote bool) {
 		body, _ := io.ReadAll(io.LimitReader(r.Body, 4<<20))
 		mu.Lock()
 		requests = append(requests, string(body))
-		toolCall := provider == "openrouter" && len(requests) == 1
+		toolCall := provider == "modal" && len(requests) == 1
 		mu.Unlock()
 		w.Header().Set("Content-Type", "text/event-stream")
 		item := map[string]any{"id": "msg-test", "type": "message", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": "done"}}}
@@ -192,11 +192,11 @@ args = ["-c", "printf fake-command-key"]
 	o.Model = "" // Use the effective configured model and reasoning.
 	if custom {
 		o.ModelProvider = provider
-		o.Model = "openai/gpt-5.6-sol"
+		o.Model = expectedModel
 		o.ContextWindow = 32000
 	}
 	expectedEffort := "high"
-	if provider == "openrouter" {
+	if provider == "modal" {
 		o.ReasoningEffort = "low"
 		expectedEffort = "low"
 	}
@@ -341,7 +341,7 @@ args = ["-c", "printf fake-command-key"]
 	captured := append([]string(nil), requests...)
 	mu.Unlock()
 	wantRequests := 2
-	if provider == "openrouter" {
+	if provider == "modal" {
 		wantRequests++
 		if len(captured) < 2 || !strings.Contains(captured[1], "function_call_output") {
 			t.Fatal("missing mock tool continuation")
@@ -358,7 +358,7 @@ args = ["-c", "printf fake-command-key"]
 			} `json:"reasoning"`
 		}
 		if err := json.Unmarshal([]byte(payload), &request); err != nil || request.Model != expectedModel {
-			t.Fatalf("request %d lost preset/model: %s", i, payload)
+			t.Fatalf("request %d lost model: %s", i, payload)
 		}
 		if request.Reasoning.Effort != expectedEffort {
 			t.Fatalf("request %d lost reasoning effort: %s", i, payload)
@@ -377,7 +377,7 @@ args = ["-c", "printf fake-command-key"]
 	if fork.Task.ID == id || fork.Task.ProjectID != created.Task.ProjectID || fork.Task.Model != expectedModel {
 		t.Fatalf("fork lost identity/project: %+v", fork)
 	}
-	if provider == "openrouter" {
+	if provider == "modal" {
 		mode := opts("mode", fork.Task.ID)
 		mode.Mode = "default"
 		var changed Result
@@ -398,6 +398,32 @@ args = ["-c", "printf fake-command-key"]
 		}
 		if err := json.Unmarshal([]byte(payload), &request); err != nil || request.Model != expectedModel {
 			t.Fatalf("fork/mode change lost model: %s", payload)
+		}
+	}
+	if provider == "modal" && !remote {
+		// Android can send an OpenAI model string without changing the provider.
+		// Verify that this stays on the custom endpoint, not subscription routing.
+		var phone struct {
+			Turn Turn `json:"turn"`
+		}
+		if err := s.call(ctx, "turn/start", map[string]any{"threadId": fork.Task.ID, "input": []any{map[string]any{"type": "text", "text": "Mock phone continuation."}}, "model": "gpt-6-astra", "collaborationMode": map[string]any{"mode": "default", "settings": map[string]any{"model": "gpt-6-astra", "reasoning_effort": "low", "developer_instructions": nil}}}, &phone, true); err != nil {
+			t.Fatal(err)
+		}
+		progress := opts("progress", fork.Task.ID)
+		progress.TurnID = phone.Turn.ID
+		progress.Wait = 10 * time.Second
+		var observed Result
+		if err := s.execute(ctx, progress, &observed); err != nil || observed.Outcome != "completed" {
+			t.Fatalf("phone-style continuation: %v %+v", err, observed)
+		}
+		mu.Lock()
+		payload := requests[len(requests)-1]
+		mu.Unlock()
+		var request struct {
+			Model string `json:"model"`
+		}
+		if err := json.Unmarshal([]byte(payload), &request); err != nil || request.Model != "gpt-6-astra" {
+			t.Fatalf("phone-style override did not reach custom provider: %s", payload)
 		}
 	}
 	for _, action := range []string{"archive", "unarchive"} {

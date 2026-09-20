@@ -15,17 +15,16 @@ environment_git and environments (id filename, name, optional error). Non-Git
 directories return no environments; malformed files are listed as unavailable.
 Version 1 TOML is supported, including multiline setup scripts and OS overrides.
 Example: codex-tasks environments --host server --cwd /path/to/repo --json`,
-	"models": `models [--json] [--refresh]
-List the public OpenRouter model catalog without credentials or endpoint configuration.
-Uses $XDG_CACHE_HOME/codex-tasks/openrouter-models.json (default
-~/.cache/codex-tasks/openrouter-models.json). A missing or invalid cache triggers
-a fetch; --refresh explicitly fetches again. Requests time out after 15 seconds.
-Failed refreshes return usable cached models with a warning; without a usable
-cache they fail. Successful fetches replace the cache atomically.
-JSON contains models (id, name, context_length), refreshed_at, and optional warning.
-Without --json, prints ID, name and context tokens as tab-separated columns.
-This command is local; task routing flags are not supported. It does not configure
-providers or route inference. Example: codex-tasks models --json --refresh`,
+	"models": `models [--host HOST | --target HOST/ACCOUNT] [--json] [--refresh]
+Read the selected server's default model/provider and Subscription model through
+stock app-server RPC. Fetch Modal endpoints through its configured loopback proxy
+using command/exec; no desktop credentials or remote CLI installation are needed.
+Cache is account-scoped under $XDG_CACHE_HOME/codex-tasks/modal-HOST-ACCOUNT.json.
+--refresh fetches the catalog again. A failed refresh retains cached models with
+a warning. Disconnected cached results do not claim a current server default.
+JSON includes models, default_model, default_provider, subscription_model,
+refreshed_at and optional warning. Requests never run inference.
+Example: codex-tasks models --host grace --json --refresh`,
 	"targets": `targets
 Print local and configured remote targets as JSON without a network request.
 The local entry has local: true and the actual OS hostname/account.`,
@@ -82,13 +81,10 @@ Omitted model/provider/mode preserve server defaults. Provider selection require
 --model and an already-configured provider on the execution host. Optional
 --reasoning-effort selects an advertised effort for the new task. Omit it to keep
 the configured default. The returned setting is verified before sending input.
---model-context-window supplies the custom model context limit. No credentials
-are handled and no provider is configured by this CLI. Optional first message starts work.
-Explicit OpenRouter models use MODEL@preset/codex-tasks, applied on the execution
-host. An existing matching suffix is accepted; other presets are rejected.
-Manage routing in that OpenRouter preset; edits affect subsequent requests from
-existing preset tasks. Existing plain-model tasks and other providers are unchanged.
-Preset errors never trigger a retry without the preset.
+--model-context-window supplies the custom model context limit. Task creation does not handle inference credentials or configure providers. Optional first message starts work.
+Modal tasks use endpoint hostnames as model IDs and --model-provider modal.
+The execution account must already have a Modal Responses provider configured.
+No provider preset is appended; there is no automatic inference fallback.
 Title max 512 bytes. On partial/unknown preserve project/worktree/task IDs and
 inspect before another create. Never blindly replay after connection loss.
 With --projectless, omitting --cwd allocates Documents/Codex/date/task-* with work/outputs and developer instructions.
@@ -157,7 +153,7 @@ Common options: --target local|HOST/ACCOUNT or --host HOST (mutually exclusive),
 TASK accepts a UUID or codex://threads/UUID. Put flags after TASK, or TASK after
 all flags. With no selector commands use the local account; find searches all
 configured sources. --target local restricts find to the current account.
-Remote selectors do not apply to activity or models.
+Remote selectors do not apply to activity.
 Messages: --message-file FILE or - for stdin, maximum 1 MiB. Shell-quote text;
 prefer a file/stdin for multiline messages. --wait defaults to 0s, maximum 60s.
 Images: create/message accept repeatable --image FILE, always a caller-local path,
