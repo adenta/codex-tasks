@@ -274,3 +274,25 @@ func TestPackagedSkillCommandExamples(t *testing.T) {
 		}
 	}
 }
+
+func TestPackagedSkillNativeFirstFallbackContract(t *testing.T) {
+	b, err := os.ReadFile("../../skills/codex-tasks/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(b)
+	for _, required := range []string{
+		"Use native task tools first, including native full-text search and archived-task discovery.",
+		"Do not invoke\n   `codex-tasks` merely to duplicate or broaden a successful native search.",
+		"General `codex-tasks find` searches task titles\nand initial previews only; never describe it as full-text search.",
+		"retry\nthe identical read-only command once with sandbox escalation",
+		"Never automatically replay a mutation.",
+	} {
+		if !strings.Contains(text, required) {
+			t.Errorf("packaged skill is missing fallback guidance %q", required)
+		}
+	}
+	if strings.Contains(text, "Combine native desktop discovery") {
+		t.Error("packaged skill still directs agents to duplicate native discovery")
+	}
+}
