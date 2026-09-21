@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/adenta/codex-tasks/internal/catalog"
 	"path/filepath"
 	"strings"
 	"time"
@@ -46,46 +45,31 @@ type Item struct {
 	ContinuationCursor string `json:"continuation_cursor,omitempty"`
 }
 type Result struct {
-	Models              []catalog.Model `json:"models,omitempty"`
-	DefaultModel        string          `json:"default_model,omitempty"`
-	DefaultProvider     string          `json:"default_provider,omitempty"`
-	SubscriptionModel   string          `json:"subscription_model,omitempty"`
-	RefreshedAt         *time.Time      `json:"refreshed_at,omitempty"`
-	Warning             string          `json:"warning,omitempty"`
-	AttachmentDirectory string          `json:"attachment_directory,omitempty"`
-	Environments        []Environment   `json:"environments,omitempty"`
-	EnvironmentGit      *bool           `json:"environment_git,omitempty"`
-	SetupStatus         string          `json:"setup_status,omitempty"`
-	SetupOutput         string          `json:"setup_output,omitempty"`
-	SetupExitCode       *int            `json:"setup_exit_code,omitempty"`
-	SetupLogPath        string          `json:"setup_log_path,omitempty"`
-	Workspace           string          `json:"workspace,omitempty"`
-	Coverage            []Coverage      `json:"coverage,omitempty"`
-	SearchComplete      *bool           `json:"search_complete,omitempty"`
-	OmittedItems        int             `json:"omitted_items,omitempty"`
-	ItemFound           *bool           `json:"item_found,omitempty"`
-	Created             bool            `json:"created,omitempty"`
-	OperationID         string          `json:"operation_id"`
-	Host                string          `json:"host"`
-	Account             string          `json:"account"`
-	Action              string          `json:"action"`
-	Outcome             string          `json:"outcome"`
-	HistoryReady        bool            `json:"history_ready,omitempty"`
-	InputAccepted       bool            `json:"input_accepted,omitempty"`
-	ErrorCategory       string          `json:"error_category,omitempty"`
-	Error               string          `json:"error,omitempty"`
-	ActivityStatus      string          `json:"activity_status,omitempty"`
-	Task                *Task           `json:"task,omitempty"`
-	Tasks               []Task          `json:"tasks,omitempty"`
-	Projects            []Project       `json:"projects,omitempty"`
-	Items               []Item          `json:"items,omitempty"`
-	NextCursor          string          `json:"next_cursor,omitempty"`
-	TurnID              string          `json:"turn_id,omitempty"`
-	TurnStatus          string          `json:"turn_status,omitempty"`
-	Attention           string          `json:"attention,omitempty"`
-	Worktree            string          `json:"worktree,omitempty"`
-	ProjectID           string          `json:"project_id,omitempty"`
-	Mode                string          `json:"mode,omitempty"`
+	AttachmentDirectory string     `json:"attachment_directory,omitempty"`
+	Coverage            []Coverage `json:"coverage,omitempty"`
+	SearchComplete      *bool      `json:"search_complete,omitempty"`
+	OmittedItems        int        `json:"omitted_items,omitempty"`
+	ItemFound           *bool      `json:"item_found,omitempty"`
+	Created             bool       `json:"created,omitempty"`
+	OperationID         string     `json:"operation_id"`
+	Host                string     `json:"host"`
+	Account             string     `json:"account"`
+	Action              string     `json:"action"`
+	Outcome             string     `json:"outcome"`
+	InputAccepted       bool       `json:"input_accepted,omitempty"`
+	ErrorCategory       string     `json:"error_category,omitempty"`
+	Error               string     `json:"error,omitempty"`
+	Task                *Task      `json:"task,omitempty"`
+	Tasks               []Task     `json:"tasks,omitempty"`
+	Projects            []Project  `json:"projects,omitempty"`
+	Items               []Item     `json:"items,omitempty"`
+	NextCursor          string     `json:"next_cursor,omitempty"`
+	TurnID              string     `json:"turn_id,omitempty"`
+	TurnStatus          string     `json:"turn_status,omitempty"`
+	Attention           string     `json:"attention,omitempty"`
+	Worktree            string     `json:"worktree,omitempty"`
+	ProjectID           string     `json:"project_id,omitempty"`
+	Mode                string     `json:"mode,omitempty"`
 }
 
 type rpc interface {
@@ -188,12 +172,8 @@ func (s *service) mode(ctx context.Context, t Task, mode string, r *Result) erro
 
 func (s *service) execute(ctx context.Context, o Options, r *Result) error {
 	switch o.Action {
-	case "models":
-		return s.models(ctx, o, r)
 	case "find":
 		return s.find(ctx, o, r)
-	case "environments":
-		return s.listEnvironments(ctx, o.CWD, r)
 	case "projects":
 		var page struct {
 			Data       []Project `json:"data"`
@@ -383,10 +363,24 @@ func applyTurn(t Turn, r *Result) {
 
 func (s *service) progress(ctx context.Context, o Options, r *Result) error {
 	deadline := time.Now().Add(o.Wait)
+	retryObservation := func(err error) error {
+		if o.Wait <= 0 || !time.Now().Before(deadline) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+			return nil
+		}
+	}
 	for {
 		t, err := s.thread(ctx, r.Task.ID)
 		if err != nil {
-			return err
+			if err = retryObservation(err); err != nil {
+				return err
+			}
+			continue
 		}
 		r.Task = &t
 		if attention(t, r) {
@@ -394,7 +388,10 @@ func (s *service) progress(ctx context.Context, o Options, r *Result) error {
 		}
 		turn, err := s.latest(ctx, t.ID)
 		if err != nil {
-			return err
+			if err = retryObservation(err); err != nil {
+				return err
+			}
+			continue
 		}
 		latestID := turn.ID
 		if o.TurnID != "" && turn.ID != o.TurnID {

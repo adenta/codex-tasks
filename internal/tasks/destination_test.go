@@ -69,15 +69,6 @@ func git(ctx context.Context, cwd string, args ...string) (string, error) {
 	b, err := cmd.Output()
 	return string(bytes.TrimSpace(b)), err
 }
-func readEnvironment(cwd, id string) (*environmentConfig, error) {
-	return (&service{rpc: &fakeRPC{}}).readEnvironment(context.Background(), cwd, id)
-}
-func listEnvironments(ctx context.Context, cwd string, r *Result) error {
-	return (&service{rpc: &fakeRPC{}}).listEnvironments(ctx, cwd, r)
-}
 func copyLocalOverride(ctx context.Context, a, b string) error {
 	return (&service{rpc: &fakeRPC{}}).copyLocalOverride(ctx, a, b)
-}
-func newProjectlessWorkspace() (string, error) {
-	return (&service{rpc: &fakeRPC{}}).newProjectlessWorkspace(context.Background())
 }

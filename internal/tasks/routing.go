@@ -20,7 +20,7 @@ func splitTarget(value string) (string, string, error) {
 	return host, parts[1], nil
 }
 
-// Expand the shorthand before routing, discovery, or activity attribution.
+// Expand the shorthand before routing or discovery.
 func localTarget(p endpoints.Config, o Options) Options {
 	if o.Target == "local" {
 		o.Target = p.Host + "/" + p.Account

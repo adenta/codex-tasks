@@ -28,9 +28,10 @@ codex-tasks read TASK_ID --target grace/agent --limit 20
 Output is English by default. Use `--json` for scripts. `find` includes archives;
 `--archive active` or `--archive archived` narrows it. Follow every returned cursor
 needed for the search. Report searched sources, unavailable sources, and remaining
-pages. Coverage is limited to the tasks exposed by the stock server. A missing
-result does not establish that a hidden task is absent. Old search cursors must
-be discarded; restart without --cursor.
+pages. General search matches titles and initial previews, not later task history.
+Coverage is limited to the tasks exposed by the stock server. A missing result
+does not establish that a hidden task is absent. Old search cursors must be
+discarded; restart without --cursor.
 When multiple tasks or locations match, obtain a task ID and target selection
 before acting. Keep original titles, project IDs, and workspace paths as returned.
 Project IDs and paths belong to the owning machine/account.
@@ -96,7 +97,7 @@ Read outcomes literally:
 - `needs_attention` means to surface the task's approval/input request.
 - `unknown` means delivery could not be established. Inspect the target and its
   recent messages before retrying. Never blindly replay a mutation after SSH loss.
-- `partial` means task created; setup incomplete. Errors can follow creation: preserve the returned task/project/worktree
+- `partial` means the task was created but a later step failed. Preserve the returned task/project/worktree
   IDs and inspect them before another create. A retained unattached worktree is
   removable only after confirming no task uses it and no work would be lost.
 
@@ -113,33 +114,9 @@ Cross-host handoff uses native `handoff_thread` and its operation status where
 available. An unsupported handoff does not authorize rewriting history or
 creating a replacement task without a request.
 
-Inspect command activity on the account/host that invoked the CLI:
-
-```sh
-codex-tasks activity --since 24h --task TASK_ID
-codex-tasks activity --outcome unknown --follow
-```
-
-The CLI records operations automatically, with `CODEX_THREAD_ID` attribution
-when present or `--source-task` when known. Missing attribution is `unknown`.
-The log covers these commands, not native tool calls, skill discovery, or every
-agent failure. Activity contains identifiers and outcomes, never message bodies.
-Storage is account-owned under `CODEX_HOME/codex-tasks`, limited to two 5 MiB files;
-a requested time window is not guaranteed retention. A logging warning does not
-mean a task operation failed and is not a reason to retry it.
-
-There is no `tasks operation` command, receipt store, or automatic reconciliation.
-The existing activity log is observational; an operation ID is not a retry key.
-Native operations remain outside codex-tasks activity coverage.
-
-For an explicitly requested projectless task, `create --projectless` may omit
-`--cwd` to allocate Documents/Codex on the destination account, with work/outputs
-and matching developer instructions. `--wait-history` requires a first message
-and waits up to ten seconds for readable accepted input; it does not mean the
-turn completed. `targets` prints local and remote endpoints without network requests;
+For an explicitly requested projectless task, use `create --projectless` with an
+explicit absolute `--cwd`. `targets` prints local and remote endpoints without network requests;
 the local entry has `local: true` and its actual hostname/account.
-The optional Omarchy popup is documented in ui/omarchy/README.md.
 
-Setup logs and activity are stored on the invoking computer. Worktree, workspace,
-and attachment_directory paths belong to the destination. No direct task database
-reads, remote helper installation, or private protocol negotiation is used.
+Worktree and attachment_directory paths belong to the destination. No direct task
+database reads, remote helper installation, or private protocol negotiation is used.

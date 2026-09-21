@@ -122,12 +122,13 @@ func TestProviderMismatchNeverStartsPaidTurn(t *testing.T) {
 	}
 }
 func TestProviderFlagValidation(t *testing.T) {
-	for _, args := range [][]string{{"create", "--projectless", "--model-provider", "custom"}, {"create", "--projectless", "--model-context-window", "32000"}, {"list", "--model-provider", "custom"}} {
+	cwd := t.TempDir()
+	for _, args := range [][]string{{"create", "--cwd", cwd, "--projectless", "--model-provider", "custom"}, {"create", "--cwd", cwd, "--projectless", "--model-context-window", "32000"}, {"list", "--model-provider", "custom"}} {
 		if _, err := parse(args, strings.NewReader("")); err == nil {
 			t.Fatalf("accepted invalid flags: %v", args)
 		}
 	}
-	o, err := parse([]string{"create", "--projectless", "--model-provider", "custom", "--model", "fixture.us-west.modal.direct", "--model-context-window", "32000"}, strings.NewReader(""))
+	o, err := parse([]string{"create", "--cwd", cwd, "--projectless", "--model-provider", "custom", "--model", "fixture.us-west.modal.direct", "--model-context-window", "32000"}, strings.NewReader(""))
 	if err != nil || o.ModelProvider != "custom" || o.ContextWindow != 32000 {
 		t.Fatalf("%+v %v", o, err)
 	}
@@ -186,13 +187,14 @@ func TestCreationReasoningEffort(t *testing.T) {
 }
 
 func TestReasoningEffortFlag(t *testing.T) {
+	cwd := t.TempDir()
 	for _, value := range []string{"low", "max", "xhigh", "none"} {
-		o, err := parse([]string{"create", "--projectless", "--reasoning-effort", value}, strings.NewReader(""))
+		o, err := parse([]string{"create", "--cwd", cwd, "--projectless", "--reasoning-effort", value}, strings.NewReader(""))
 		if err != nil || o.ReasoningEffort != value {
 			t.Fatalf("%+v %v", o, err)
 		}
 	}
-	for _, args := range [][]string{{"list", "--reasoning-effort", "low"}, {"create", "--projectless", "--reasoning-effort", "bad value"}, {"create", "--projectless", "--reasoning-effort", "default"}} {
+	for _, args := range [][]string{{"list", "--reasoning-effort", "low"}, {"create", "--cwd", cwd, "--projectless", "--reasoning-effort", "bad value"}, {"create", "--cwd", cwd, "--projectless", "--reasoning-effort", "default"}} {
 		if _, err := parse(args, strings.NewReader("")); err == nil {
 			t.Fatalf("accepted %v", args)
 		}

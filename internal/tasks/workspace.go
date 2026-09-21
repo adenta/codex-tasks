@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
+	"time"
 )
 
 type Project struct {
@@ -118,7 +120,7 @@ func (s *service) workspace(ctx context.Context, o Options) (string, bool, error
 	}
 	sourceRoot, err := s.git(ctx, o.CWD, "rev-parse", "--show-toplevel")
 	if err != nil {
-		isGit, e := s.environmentRepository(ctx, o.CWD)
+		isGit, e := s.isGitRepository(ctx, o.CWD)
 		if e != nil {
 			return "", false, e
 		}
@@ -160,31 +162,21 @@ func (s *service) workspace(ctx context.Context, o Options) (string, bool, error
 	return path, true, nil
 }
 
+func (s *service) isGitRepository(ctx context.Context, cwd string) (bool, error) {
+	r, err := s.commandResult(ctx, "", false, "git", "-C", cwd, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return false, err
+	}
+	if r.ExitCode != nil && *r.ExitCode == 0 {
+		return true, nil
+	}
+	if strings.Contains(r.Stderr, "not a git repository") {
+		return false, nil
+	}
+	return false, fmt.Errorf("cannot determine whether workspace is a Git repository")
+}
+
 func (s *service) create(ctx context.Context, o Options, r *Result) error {
-	var environment *environmentConfig
-	if o.Environment != "" {
-		isGit, err := s.environmentRepository(ctx, o.CWD)
-		if err != nil {
-			return err
-		}
-		if !isGit || o.Checkout {
-			return fmt.Errorf("environment setup requires a new Git worktree")
-		}
-		environment, err = s.readEnvironment(ctx, o.CWD, o.Environment)
-		if err != nil {
-			return err
-		}
-	}
-	generated := ""
-	if o.Projectless && o.CWD == "" {
-		var err error
-		generated, err = s.newProjectlessWorkspace(ctx)
-		if err != nil {
-			return err
-		}
-		o.CWD = generated
-		r.Workspace = generated
-	}
 	// Establish project identity first, and preserve any created project ID in
 	// the result even if a later operation fails.
 	project, err := s.project(ctx, o)
@@ -199,15 +191,7 @@ func (s *service) create(ctx context.Context, o Options, r *Result) error {
 	if err != nil {
 		return err
 	}
-	if environment != nil {
-		if err := s.runEnvironmentSetup(ctx, workspace, environment, r); err != nil {
-			return err
-		}
-	}
 	params := map[string]any{"cwd": workspace, "ephemeral": false, "historyMode": "paginated", "threadSource": "agent_created_thread"}
-	if generated != "" {
-		params["developerInstructions"] = projectlessInstructions(generated)
-	}
 	if project != "" {
 		params["projectId"] = project
 	}
@@ -237,7 +221,7 @@ func (s *service) create(ctx context.Context, o Options, r *Result) error {
 	err = s.call(ctx, "thread/start", params, &reply, true)
 	if err != nil {
 		var rejected *RPCError
-		if owned && environment == nil && errors.As(err, &rejected) {
+		if owned && errors.As(err, &rejected) {
 			// Remove only our own clean, unattached worktree after a definite
 			// rejection. On uncertainty preserve it for inspection.
 			if _, cleanup := s.git(ctx, o.CWD, "worktree", "remove", "--", workspace); cleanup == nil {
@@ -287,12 +271,15 @@ func (s *service) create(ctx context.Context, o Options, r *Result) error {
 		r.Outcome = "created"
 	}
 	if o.Message != "" || len(o.Images) > 0 {
-		if err := s.message(ctx, o, r); err != nil {
-			return err
-		}
-		if o.WaitHistory {
-			return s.waitHistory(ctx, r)
-		}
+		return s.message(ctx, o, r)
 	}
 	return nil
+}
+
+func operationTimeout(o Options) time.Duration {
+	timeout := 30*time.Second + o.Wait
+	if len(o.Images) > 0 {
+		timeout += 2 * time.Minute
+	}
+	return timeout
 }

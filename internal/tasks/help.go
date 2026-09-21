@@ -8,28 +8,12 @@ import (
 )
 
 var commandHelp = map[string]string{
-	"environments": `environments --cwd DIRECTORY
-List .codex/environments/*.toml in the selected destination checkout. CWD must be
-absolute. Requires the running server; does not run setup scripts. JSON includes
-environment_git and environments (id filename, name, optional error). Non-Git
-directories return no environments; malformed files are listed as unavailable.
-Version 1 TOML is supported, including multiline setup scripts and OS overrides.
-Example: codex-tasks environments --host server --cwd /path/to/repo --json`,
-	"models": `models [--host HOST | --target HOST/ACCOUNT] [--json] [--refresh]
-Read the selected server's default model/provider and Subscription model through
-stock app-server RPC. Fetch Modal endpoints through its configured loopback proxy
-using command/exec; no desktop credentials or remote CLI installation are needed.
-Cache is account-scoped under $XDG_CACHE_HOME/codex-tasks/modal-HOST-ACCOUNT.json.
---refresh fetches the catalog again. A failed refresh retains cached models with
-a warning. Disconnected cached results do not claim a current server default.
-JSON includes models, default_model, default_provider, subscription_model,
-refreshed_at and optional warning. Requests never run inference.
-Example: codex-tasks models --host grace --json --refresh`,
 	"targets": `targets
 Print local and configured remote targets as JSON without a network request.
 The local entry has local: true and the actual OS hostname/account.`,
 	"find": `find --query TEXT [--archive all|active|archived] [--limit N] [--cursor CURSOR]
-Search IDs, codex://threads/UUID links, titles and previews on configured sources.
+Search IDs, codex://threads/UUID links, titles and initial previews on configured sources.
+This is not full-history search; words that appear only in later turns do not match.
 Includes archives by default; limit 20 per source (1–100), scan bound 1000 entries.
 Follow every next_cursor with unchanged query, filters and selectors. Coverage
 may be incomplete even when a match is found. Uses stock thread/list and exact
@@ -52,43 +36,22 @@ and share those bounds. Offset is a Unicode character offset, default 0.
 Follow next_cursor even on empty pages. For truncated items use that item's
 continuation_cursor, --item and next_offset; retain task/turn/output filters.
 Example: codex-tasks read TASK_UUID --limit 20 --host server`,
-	"create": `create [--cwd DIRECTORY] [--project ID | --projectless]
+	"create": `create --cwd DIRECTORY [--project ID | --projectless]
        [--checkout | --ref REF] [--title TITLE] [--model MODEL] [--model-provider PROVIDER]
-       [--model-context-window TOKENS] [--reasoning-effort VALUE] [--environment FILE.toml]
+       [--model-context-window TOKENS] [--reasoning-effort VALUE]
        [--mode plan|default] [--message-file FILE|-] [--image FILE ...] [--wait DURATION]
 Create a task only within the user's requested scope. CWD must be absolute on
 the target. Match or create project assignment; ambiguous roots require --project.
 Git defaults to a detached worktree from local origin/HEAD; no guessed ref or
 fetch. --ref selects a requested ref; --checkout uses the existing checkout.
 Confirmed non-Git directories are used directly. --projectless omits assignment.
---environment selects an existing filename inside the checkout's .codex/environments
-directory. The selected configuration is read before creation, then its setup
-script runs through Codex command/exec with Bash in the new worktree before any task starts.
-The destination OS setup override replaces the default script when present.
-An empty script succeeds. Setup uses the Codex server-computed environment, has
-no interactive stdin, and times out after 10 minutes. It requests dangerFullAccess
-to preserve account-level setup access; server requirements may reject it. This
-does not alter the later task's permissions. No subprocess fallback is attempted.
-Omitting --environment skips setup; --checkout and non-Git directories cannot use it.
-Failure retains the worktree and returns setup_status, setup_exit_code when known,
-and up to 8 KiB of readable setup_output. A lost reply is unknown and never replayed.
-Inspect before retrying; scripts may have side effects. setup_log_path names a
-private invoking-computer file under CODEX_HOME/codex-tasks/setup-logs. Streamed output
-is captured up to 1 MiB per stream and 2 MiB per log plus metadata; line breaks
-are preserved. Logs older than seven days expire on the next nonempty setup.
-Output is not stored in the activity log. Scripts should avoid printing secrets.
 Omitted model/provider/mode preserve server defaults. Provider selection requires
 --model and an already-configured provider on the execution host. Optional
 --reasoning-effort selects an advertised effort for the new task. Omit it to keep
 the configured default. The returned setting is verified before sending input.
 --model-context-window supplies the custom model context limit. Task creation does not handle inference credentials or configure providers. Optional first message starts work.
-Modal tasks use endpoint hostnames as model IDs and --model-provider modal.
-The execution account must already have a Modal Responses provider configured.
-No provider preset is appended; there is no automatic inference fallback.
 Title max 512 bytes. On partial/unknown preserve project/worktree/task IDs and
 inspect before another create. Never blindly replay after connection loss.
-With --projectless, omitting --cwd allocates Documents/Codex/date/task-* with work/outputs and developer instructions.
---wait-history requires text or images and waits up to 10s for readable accepted input.
 Example: codex-tasks create --cwd /path/to/repo --mode plan --message-file brief.txt`,
 	"fork": `fork TASK [--title TITLE] [--mode plan|default]
 Fork persisted history before any unfinished running turn. Inherits checkout;
@@ -117,14 +80,6 @@ Example: codex-tasks archive TASK_UUID`,
 	"unarchive": `unarchive TASK
 Restore an archived task through the app server.
 Example: codex-tasks unarchive TASK_UUID`,
-	"activity": `activity [--since DURATION] [--task ID] [--action NAME] [--outcome VALUE]
-         [--limit N] [--follow]
-Inspect activity on the invoking account; remote selectors are not supported.
-Defaults: since 24h, limit 20 (1–100). --follow streams new events until Ctrl-C;
-with --json it emits JSON Lines. Two 5 MiB files bound retention, not time.
-Stored under CODEX_HOME/codex-tasks. Contains identifiers/outcomes, not messages.
-Covers this CLI only; logging failure does not imply a failed task operation.
-Example: codex-tasks activity --outcome unknown --since 24h`,
 	"config": `Configuration (no configuration changes are made by this help command)
 Read $CODEX_TASKS_CONFIG, otherwise $XDG_CONFIG_HOME/codex-tasks/config.json
 (default ~/.config/codex-tasks/config.json). Missing default config uses local
@@ -149,11 +104,10 @@ fail explicitly. No task recreation or automatic mutation retry is attempted.`,
 
 const commonHelp = `
 Common options: --target local|HOST/ACCOUNT or --host HOST (mutually exclusive),
---json (one result object), --source-task UUID (default CODEX_THREAD_ID).
+--json (one result object).
 TASK accepts a UUID or codex://threads/UUID. Put flags after TASK, or TASK after
 all flags. With no selector commands use the local account; find searches all
 configured sources. --target local restricts find to the current account.
-Remote selectors do not apply to activity.
 Messages: --message-file FILE or - for stdin, maximum 1 MiB. Shell-quote text;
 prefer a file/stdin for multiline messages. --wait defaults to 0s, maximum 60s.
 Images: create/message accept repeatable --image FILE, always a caller-local path,
@@ -162,11 +116,11 @@ including for remote tasks. Text is optional with images. PNG/JPEG only, at most
 stock fs/writeFile over the existing SSH connection; uploads finish before submission.
 No remote codex-tasks installation or private protocol is used.
 Private copies under CODEX_HOME/codex-tasks/attachments are retained on acceptance
-or uncertain delivery; files older than 7 days are removed on the next staging or
-clipboard capture. Caller-owned source files are never deleted. Image operations
+or uncertain delivery; files older than 7 days are removed by the next attachment
+staging operation. Caller-owned source files are never deleted. Image operations
 allow up to 2 extra minutes for staging/transfer. History text omits image content.
 Runtime actions attach to an existing account-owned Unix app-server socket.
-Activity, targets and models can operate without a running server. Native tools remain
+Targets can operate without a running server. Native tools remain
 necessary for desktop-only tasks and handoff; the optional skill prefers native
 helpers and uses this CLI when those helpers are unavailable or insufficient.
 JSON metadata and outcomes: see docs/contract.md. Unknown/partial results retain
@@ -179,7 +133,7 @@ Use 'codex-tasks help config' for endpoint setup and troubleshooting.
 // Help works before reading configuration or connecting to a runtime.
 func Help(args []string, w io.Writer) (int, bool) {
 	if len(args) == 1 && args[0] == "--version" {
-		fmt.Fprintln(w, buildinfo.BuildID)
+		fmt.Fprintln(w, "codex-tasks", buildinfo.BuildID)
 		return 0, true
 	}
 	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" || (args[0] == "help" && len(args) == 1) {
@@ -204,7 +158,7 @@ func Help(args []string, w io.Writer) (int, bool) {
 			}
 			if strings.HasPrefix(a, "-") && !strings.Contains(a, "=") {
 				switch a {
-				case "--refresh", "--wait-history", "--json", "--checkout", "--projectless", "--archived", "--include-outputs", "--follow":
+				case "--json", "--checkout", "--projectless", "--archived", "--include-outputs":
 				default:
 					i++
 				}
@@ -220,7 +174,7 @@ func Help(args []string, w io.Writer) (int, bool) {
 		return 2, true
 	}
 	fmt.Fprintln(w, "Usage: codex-tasks "+text)
-	if cmd != "config" && cmd != "models" {
+	if cmd != "config" {
 		fmt.Fprint(w, commonHelp)
 	}
 	return 0, true

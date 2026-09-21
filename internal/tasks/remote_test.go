@@ -229,10 +229,6 @@ func TestRemoteStockTransport(t *testing.T) {
 			if _, err := os.Stat(source); err != nil {
 				t.Fatal("source deleted")
 			}
-			activity, _ := os.ReadFile(filepath.Join(p.CodexHome, "codex-tasks", "tasks-activity.jsonl"))
-			if strings.Contains(string(activity), "SECRET") {
-				t.Fatal("activity leaked prompt")
-			}
 		})
 	}
 }

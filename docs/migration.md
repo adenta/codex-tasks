@@ -1,13 +1,14 @@
-# Cutover to direct stock app-server access
+# Version 1.0.0 cutover
 
-The modal still calls its local codex-tasks CLI. The CLI connects directly to the
-existing stock Codex app server: locally by Unix socket, remotely through SSH and
-stock `codex app-server proxy`. The proxy forwards raw WebSocket traffic.
+The CLI connects directly to an existing stock Codex app server: locally by Unix
+socket, remotely through SSH and stock `codex app-server proxy`. The proxy forwards
+raw WebSocket traffic. Version 1.0.0 removes the former panel backend and defines
+the first stable command and JSON contract.
 
 ## Migration
 
 1. Build and validate the client, then update the invoking computer's binary and
-   optional skill when deployment is authorized. The modal interface is unchanged.
+   optional skill only when deployment is separately authorized.
 2. Preserve existing target host/account/SSH aliases. A target may optionally set
    an absolute `socket`; otherwise stock proxy uses Codex's default socket.
 3. Verify stock `codex` is on the remote account's PATH and its server is already
@@ -18,8 +19,9 @@ stock `codex app-server proxy`. The proxy forwards raw WebSocket traffic.
    exposed task list/read interface. Direct SQLite/WAL reads are removed.
 
 Task IDs, history, projects, worktrees and retained attachments need no migration.
-New setup logs are on the invoking computer; old destination logs stay in place.
-Client preferences and caches remain unchanged. Existing activity is preserved.
+Existing model caches, setup logs, and activity logs are left untouched but become
+inert; version 1.0.0 neither reads nor deletes them. Every new task now requires an
+explicit absolute `--cwd`, including `--projectless` tasks.
 
 Recovery means restoring the previous client binary if necessary; it does not
 rewrite Codex task state or replay an uncertain operation. Existing remote helper
@@ -32,7 +34,7 @@ Use the existing managed Codex 0.154.0 binary with isolated homes, fake credenti
 and a local mock model. The stock lifecycle test exercises task operations and
 remote creation through the actual stock proxy with no remote codex-tasks binary.
 Run `go test ./...`, `go vet ./...`, the lifecycle test with `CODEX_TASKS_TEST_CODEX`,
-and the launcher fixtures. Identity mismatches, unavailable servers, rejected
+and validate the packaged tree. Identity mismatches, unavailable servers, rejected
 methods/uploads and uncertain submissions must stop without automatic replay.
 
 Generate schemas from the exact candidate stock executable when updating support:

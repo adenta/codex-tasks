@@ -4,8 +4,6 @@ This is the standalone task CLI and optional skill. Preserve direct shell usage
 and complete offline help. Native helpers are preferred by the skill; this CLI
 fills gaps when they are unavailable, broken, or insufficient.
 
-The optional ui/omarchy remote launcher is in scope; keep the CLI independent.
-After changing shell components, restart the shell if needed and verify the running UI; reload commands may retain cached components.
 Do not add server lifecycle management, fleet management,
 authentication setup or provider/billing infrastructure. Keep remote SSH aliases
 explicit, verify host/account identity before mutation, and never replay an

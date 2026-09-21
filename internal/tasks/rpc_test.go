@@ -9,12 +9,24 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/coder/websocket"
 	"github.com/google/uuid"
 )
+
+func TestLocalSocketPermissionDiagnostic(t *testing.T) {
+	err := localSocketError(syscall.EPERM)
+	if !strings.Contains(err.Error(), "blocked by sandbox or OS permissions") {
+		t.Fatalf("permission failure was ambiguous: %v", err)
+	}
+	err = localSocketError(os.ErrNotExist)
+	if !strings.Contains(err.Error(), "control socket unavailable") {
+		t.Fatalf("missing socket diagnostic changed: %v", err)
+	}
+}
 
 func TestRPCCommandExecStreamsOutputAndExit(t *testing.T) {
 	socket := testSocket(t, func(c *websocket.Conn, ctx context.Context) {

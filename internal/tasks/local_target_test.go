@@ -56,6 +56,9 @@ func TestTargetsIncludesLocalIdentity(t *testing.T) {
 	if len(result.Targets) != 2 || !result.Targets[0].Local || result.Targets[0].Host != p.Host || result.Targets[0].Account != p.Account || result.Targets[1].Local {
 		t.Fatalf("unexpected targets: %s", out.String())
 	}
+	if strings.Contains(out.String(), "desktop_projects") {
+		t.Fatalf("targets leaked desktop presentation state: %s", out.String())
+	}
 }
 
 func TestLocalTargetReportsConnectionFailure(t *testing.T) {

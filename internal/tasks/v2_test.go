@@ -203,7 +203,7 @@ func TestPartialCreationEnglishAndDiagnostics(t *testing.T) {
 	setError(&r, errors.New("title rejected"))
 	var out strings.Builder
 	render(&out, r, false)
-	if r.Outcome != "partial" || !strings.Contains(out.String(), "Task created; setup is incomplete") || !strings.Contains(out.String(), task.ID) {
+	if r.Outcome != "partial" || !strings.Contains(out.String(), "Task created; a later step failed") || !strings.Contains(out.String(), task.ID) {
 		t.Fatal(r, out.String())
 	}
 

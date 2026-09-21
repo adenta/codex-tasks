@@ -224,6 +224,29 @@ func TestProgressReportsSemanticFailure(t *testing.T) {
 	}
 }
 
+func TestProgressRetriesTransientObservationWhileWaiting(t *testing.T) {
+	task := storedTask()
+	task.Status.Type = "idle"
+	turn := Turn{ID: uuid.NewString(), Status: "completed"}
+	reads := 0
+	f := &fakeRPC{handle: func(m string, _ map[string]any) (any, error) {
+		if m == "thread/read" {
+			reads++
+			if reads == 1 {
+				return nil, errors.New("rollout metadata is not readable yet")
+			}
+			return map[string]any{"thread": task}, nil
+		}
+		return map[string]any{"data": []Turn{turn}}, nil
+	}}
+	o := opts("progress", task.ID)
+	o.Wait = time.Second
+	r := Result{Task: &task, Outcome: "started"}
+	if err := (&service{rpc: f}).progress(context.Background(), o, &r); err != nil || r.Outcome != "completed" || reads != 2 {
+		t.Fatalf("transient observation was not retried: %+v reads=%d err=%v", r, reads, err)
+	}
+}
+
 func TestProgressDoesNotMistakeQueuedStartForInterruptedHistory(t *testing.T) {
 	task := storedTask()
 	task.Status.Type = "idle"
@@ -259,7 +282,15 @@ func TestCLIValidationAndHostInventory(t *testing.T) {
 	if err != nil || !o.JSON || o.Message != "quoted `message` $(literal)" {
 		t.Fatalf("%+v %v", o, err)
 	}
-	for _, args := range [][]string{{"message", id}, {"list", "--mode", "plan"}, {"create", "--cwd", "relative"}, {"progress", id, "--wait", "61s"}, {"read", "not-a-task"}, {"mode", id}, {"message", id, "--message-file", "-", "--model", "changed"}} {
+	for _, args := range [][]string{
+		{"message", id}, {"list", "--mode", "plan"}, {"create", "--cwd", "relative"},
+		{"progress", id, "--wait", "61s"}, {"read", "not-a-task"}, {"mode", id},
+		{"message", id, "--message-file", "-", "--model", "changed"},
+		{"models"}, {"environments", "--cwd", "/tmp"}, {"activity"},
+		{"create", "--cwd", "/tmp", "--environment", "dev.toml"},
+		{"create", "--cwd", "/tmp", "--wait-history"},
+		{"list", "--source-task", id}, {"list", "--refresh"},
+	} {
 		if _, err := parse(args, strings.NewReader("body")); err == nil {
 			t.Fatalf("accepted %v", args)
 		}
@@ -275,6 +306,17 @@ func TestCLIValidationAndHostInventory(t *testing.T) {
 	}
 	if _, _, _, err := resolveRoute(grace, Options{Host: "love"}); err == nil {
 		t.Fatal("used the desktop account's connection for the agent account")
+	}
+}
+
+func TestProjectlessCreateRequiresExplicitWorkspace(t *testing.T) {
+	if _, err := parse([]string{"create", "--projectless"}, strings.NewReader("")); err == nil || !strings.Contains(err.Error(), "--cwd") {
+		t.Fatalf("projectless create accepted no workspace: %v", err)
+	}
+	cwd := t.TempDir()
+	o, err := parse([]string{"create", "--cwd", cwd, "--projectless"}, strings.NewReader(""))
+	if err != nil || o.CWD != cwd || !o.Projectless {
+		t.Fatalf("explicit projectless workspace rejected: %+v %v", o, err)
 	}
 }
 
@@ -317,19 +359,5 @@ func TestWorktreeIsolationAndMissingDefaultRef(t *testing.T) {
 	path, owned, err = s.workspace(ctx, o)
 	if err != nil || owned || path != repo {
 		t.Fatal(path, owned, err)
-	}
-}
-
-func TestActivityFailureDoesNotChangeOperationOutcome(t *testing.T) {
-	p, _ := fixtureRole("xps")
-	p.CodexHome = filepath.Join(t.TempDir(), "missing")
-	o := opts("list", "")
-	o.JSON = true
-	var out, errs strings.Builder
-	code := run(context.Background(), p, o, &out, &errs)
-	var r Result
-	_ = json.Unmarshal([]byte(out.String()), &r)
-	if code != 1 || r.ErrorCategory != "transport_unavailable" || r.ActivityStatus != "unavailable" || !strings.Contains(errs.String(), "Warning") {
-		t.Fatalf("%d %+v %s", code, r, errs.String())
 	}
 }

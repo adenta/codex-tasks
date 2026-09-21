@@ -2,10 +2,33 @@ package tasks
 
 import (
 	"context"
+	"github.com/adenta/codex-tasks/internal/buildinfo"
 	"github.com/adenta/codex-tasks/internal/endpoints"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestVersionContract(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("..", "..", "VERSION"))
+	if err != nil || strings.TrimSpace(string(b)) != "1.0.0" {
+		t.Fatalf("canonical version: %q %v", b, err)
+	}
+	original := buildinfo.BuildID
+	defer func() { buildinfo.BuildID = original }()
+	for _, version := range []string{"1.0.0", "development"} {
+		buildinfo.BuildID = version
+		var out strings.Builder
+		if code, handled := Help([]string{"--version"}, &out); code != 0 || !handled || out.String() != "codex-tasks "+version+"\n" {
+			t.Fatalf("version %q: %d %t %q", version, code, handled, out.String())
+		}
+	}
+	makefile, err := os.ReadFile(filepath.Join("..", "..", "Makefile"))
+	if err != nil || !strings.Contains(string(makefile), "codex-tasks-$(VERSION)-linux-") {
+		t.Fatalf("distribution is not versioned: %v", err)
+	}
+}
 
 func TestHelpOfflineAndPerCommand(t *testing.T) {
 	t.Setenv("CODEX_HOME", "relative-invalid")
@@ -24,6 +47,22 @@ func TestHelpOfflineAndPerCommand(t *testing.T) {
 		t.Fatal("interpreted flag value as help")
 	}
 }
+
+func TestRemovedCommandsAndFlagsFailWithUsageExit(t *testing.T) {
+	id := "00000000-0000-4000-8000-000000000001"
+	for _, args := range [][]string{
+		{"models"}, {"environments", "--cwd", "/tmp"}, {"activity"},
+		{"create", "--cwd", "/tmp", "--environment", "dev.toml"},
+		{"create", "--cwd", "/tmp", "--wait-history"},
+		{"list", "--source-task", id}, {"list", "--refresh"},
+	} {
+		var out, stderr strings.Builder
+		if code := Run(endpoints.Config{}, args, strings.NewReader(""), &out, &stderr); code != 2 || stderr.Len() == 0 {
+			t.Fatalf("removed interface %v: code=%d stdout=%q stderr=%q", args, code, out.String(), stderr.String())
+		}
+	}
+}
+
 func TestCursorRejectsEndpointRemap(t *testing.T) {
 	p, _ := fixtureAccount("grace", "agent", t.TempDir())
 	o := opts("find", "")

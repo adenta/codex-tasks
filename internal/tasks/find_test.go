@@ -89,3 +89,22 @@ func TestFindSparseBoundAndUnsupportedServer(t *testing.T) {
 		t.Fatal("unsupported server treated as empty")
 	}
 }
+
+func TestFindMatchesOnlyTitleAndInitialPreview(t *testing.T) {
+	s := service{rpc: &fakeRPC{handle: func(m string, _ map[string]any) (any, error) {
+		if m != "thread/list" {
+			t.Fatalf("unexpected full-history lookup: %s", m)
+		}
+		return map[string]any{"data": []Task{{Name: "Printer research", Preview: "Initial request"}}}, nil
+	}}}
+	o := opts("find", "")
+	o.Query = "later-turn-only"
+	r := Result{}
+	if err := s.find(context.Background(), o, &r); err != nil || len(r.Tasks) != 0 {
+		t.Fatalf("later-turn text unexpectedly matched: %+v %v", r, err)
+	}
+	o.Query = "printer initial"
+	if err := s.find(context.Background(), o, &r); err != nil || len(r.Tasks) != 2 {
+		t.Fatalf("title/preview text did not match: %+v %v", r, err)
+	}
+}
