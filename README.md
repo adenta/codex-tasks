@@ -54,6 +54,43 @@ Optionally copy `skills/codex-tasks` into your Codex skills directory. The skill
 prefers native helpers and falls back to this utility for missing capabilities.
 Updating or removing the skill has no effect on the executable.
 
+## Deploy to the personal caller accounts
+
+This repository owns an optional Ansible playbook for the three accounts that
+invoke `codex-tasks`: XPS desktop (`andre`), XPS agent, and Grace agent. It
+installs the versioned executable and the matching companion skill as one release.
+It does not configure SSH, Codex authentication, app-server lifecycle, endpoint
+configuration, or task state.
+
+Install the pinned `ansible-core` dependency through Mise, then preview or apply
+the playbook from the Grace agent checkout:
+
+```sh
+mise install
+ansible-playbook deploy/codex-tasks.yml --limit grace --check --diff
+ansible-playbook deploy/codex-tasks.yml --limit grace
+ansible-playbook deploy/codex-tasks.yml --limit xps --check --diff
+ansible-playbook deploy/codex-tasks.yml --limit xps
+```
+
+`grace` and `xps` are inventory groups for the physical machines. Limiting to
+`xps` updates both XPS caller accounts; use `--limit xps-desktop` or
+`--limit xps-agent` for one account. With no limit, inventory order is XPS
+desktop, XPS agent, then Grace agent.
+
+The playbook refuses an uncommitted checkout, runs the Go tests, vet, and the
+isolated stock lifecycle test, then builds from the selected commit. Each target
+is identity-checked before mutation. Installation stages and verifies both
+artifacts before replacing live paths, records the commit under
+`~/.local/state/codex-tasks/deployments/current.json`, and restores the prior
+managed paths if post-installation verification fails. Preview mode performs the
+same source validation and tests but does not change target files.
+
+The checked-in inventory deliberately uses the existing `xps` SSH alias and a
+local Grace connection; it contains no addresses, private keys, or passwords.
+Running the all-machine deployment from another controller requires an equivalent
+`grace` SSH alias and changing `grace-agent` from a local to an SSH connection.
+
 ## Configure existing endpoints
 
 Local commands use the current OS hostname/account and `$CODEX_HOME`, defaulting

@@ -1,0 +1,43 @@
+---
+all:
+  children:
+    codex_tasks_callers:
+      hosts:
+        # XPS is reached through the existing agent-owned SSH alias. The
+        # desktop endpoint deliberately becomes andre only for installation.
+        xps-desktop:
+          ansible_host: xps
+          ansible_user: agent
+          ansible_become: true
+          ansible_become_user: andre
+          ansible_become_method: sudo
+          codex_tasks_expected_hostname: xps13-2026
+          codex_tasks_expected_user: andre
+          codex_tasks_home: /home/andre
+          codex_tasks_skill_root: /home/andre/.codex/skills
+
+        xps-agent:
+          ansible_host: xps
+          ansible_user: agent
+          codex_tasks_expected_hostname: xps13-2026
+          codex_tasks_expected_user: agent
+          codex_tasks_home: /home/agent
+          codex_tasks_skill_root: /home/agent/.codex/skills
+
+        # The repository currently lives on Grace under the agent account, so
+        # this endpoint is local and does not invent a second SSH credential.
+        grace-agent:
+          ansible_connection: local
+          codex_tasks_expected_hostname: grace
+          codex_tasks_expected_user: agent
+          codex_tasks_home: /home/agent
+          codex_tasks_skill_root: /home/agent/.codex/skills
+
+    xps:
+      hosts:
+        xps-desktop:
+        xps-agent:
+
+    grace:
+      hosts:
+        grace-agent:

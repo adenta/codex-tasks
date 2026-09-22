@@ -10,6 +10,11 @@ explicit, verify host/account identity before mutation, and never replay an
 uncertain mutation automatically. Task state/history is read-only outside the
 existing app-server RPC interface.
 
+The repository-owned Ansible playbook may install the versioned executable and
+matching skill to the explicit personal caller inventory. Keep that deployment
+narrow: it must not configure SSH, authentication, app-server lifecycle, endpoint
+configuration, or task state, and it must verify target identity before mutation.
+
 Run `go test ./...`, `go vet ./...`, and the stock lifecycle test using
 `CODEX_TASKS_TEST_CODEX` before release. Use an isolated Codex home, fake credentials
 and a mock model; no live inference or task mutation in tests. Use existing managed
