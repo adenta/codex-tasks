@@ -395,9 +395,11 @@ args = ["-c", "printf fake-command-key"]
 		}
 	}
 	for _, action := range []string{"archive", "unarchive"} {
-		r := Result{Outcome: "ok"}
-		if err := s.execute(ctx, opts(action, fork.Task.ID), &r); err != nil {
-			t.Fatalf("%s: %v", action, err)
+		batch := s.executeBatch(ctx, opts(action, ""), []Task{{ID: fork.Task.ID}, {ID: id}})
+		for _, result := range batch {
+			if result.Outcome != action+"d" {
+				t.Fatalf("stock batch %s: %+v", action, batch)
+			}
 		}
 		search := opts("find", "")
 		search.Query = "codex://threads/" + fork.Task.ID
@@ -407,6 +409,14 @@ args = ["-c", "printf fake-command-key"]
 			_ = s.call(ctx, "thread/list", map[string]any{"archived": action == "archive", "sourceKinds": allTaskSources, "modelProviders": []string{}, "useStateDbOnly": true}, &listed, false)
 			t.Logf("raw listing: %#v", listed)
 			t.Fatalf("find after %s: %+v %v", action, found, err)
+		}
+		if found.Tasks[0].UpdatedAt == nil || found.Tasks[0].CreatedAt == nil {
+			t.Fatalf("stock timestamps missing: %+v", found.Tasks[0])
+		}
+		search.UpdatedBefore = time.Unix(*found.Tasks[0].UpdatedAt, 0).UTC().Format(time.RFC3339)
+		filtered := Result{}
+		if err := s.execute(ctx, search, &filtered); err != nil || len(filtered.Tasks) != 0 {
+			t.Fatalf("stock cutoff boundary: %+v %v", filtered, err)
 		}
 
 	}

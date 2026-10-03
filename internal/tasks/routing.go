@@ -62,12 +62,12 @@ func resolveRoute(p endpoints.Config, o Options) (host, account, alias string, e
 	return
 }
 
-func executeAt(ctx context.Context, p endpoints.Config, o Options, r *Result) error {
+func connectAt(ctx context.Context, p endpoints.Config, o Options, r *Result) (*service, error) {
 	host, account, alias, err := resolveRoute(p, o)
 	r.Host, r.Account = host, account
 	if err != nil {
 		r.ErrorCategory = "route_unavailable"
-		return err
+		return nil, err
 	}
 	o.Target, o.Host = "", host
 	var c *Client
@@ -84,24 +84,39 @@ func executeAt(ctx context.Context, p endpoints.Config, o Options, r *Result) er
 	}
 	if err != nil {
 		r.ErrorCategory = "transport_unavailable"
-		return err
+		return nil, err
 	}
-	defer c.Close()
+	ok := false
+	defer func() {
+		if !ok {
+			c.Close()
+		}
+	}()
 	if c.CodexHome == "" || c.PlatformOS != "linux" {
-		return fmt.Errorf("stock server must report its Codex home and Linux platform")
+		return nil, fmt.Errorf("stock server must report its Codex home and Linux platform")
 	}
-	s := service{rpc: c, client: c, home: c.CodexHome, localHome: p.CodexHome}
+	s := &service{rpc: c, client: c, home: c.CodexHome, localHome: p.CodexHome}
 	if alias != "" {
 		out, e := s.command(ctx, "", false, "sh", "-c", "hostname && id -un")
 		if e != nil {
-			return fmt.Errorf("cannot verify server identity: %w", e)
+			return nil, fmt.Errorf("cannot verify server identity: %w", e)
 		}
 		fields := strings.Fields(out)
 		if len(fields) != 2 || strings.ToLower(fields[0]) != host || fields[1] != account {
 			r.ErrorCategory = "destination_mismatch"
-			return fmt.Errorf("server identity does not match %s/%s; no task action was sent", host, account)
+			return nil, fmt.Errorf("server identity does not match %s/%s; no task action was sent", host, account)
 		}
 	}
+	ok = true
+	return s, nil
+}
+
+func executeAt(ctx context.Context, p endpoints.Config, o Options, r *Result) error {
+	s, err := connectAt(ctx, p, o, r)
+	if err != nil {
+		return err
+	}
+	defer s.client.Close()
 	err = s.executeWithImages(ctx, p, o, r)
 	if s.uncertain {
 		r.Outcome, r.ErrorCategory = "unknown", "transport_uncertain"

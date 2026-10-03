@@ -12,12 +12,12 @@ import (
 
 func TestVersionContract(t *testing.T) {
 	b, err := os.ReadFile(filepath.Join("..", "..", "VERSION"))
-	if err != nil || strings.TrimSpace(string(b)) != "1.0.0" {
+	if err != nil || strings.TrimSpace(string(b)) != "1.1.0" {
 		t.Fatalf("canonical version: %q %v", b, err)
 	}
 	original := buildinfo.BuildID
 	defer func() { buildinfo.BuildID = original }()
-	for _, version := range []string{"1.0.0", "development"} {
+	for _, version := range []string{"1.1.0", "development"} {
 		buildinfo.BuildID = version
 		var out strings.Builder
 		if code, handled := Help([]string{"--version"}, &out); code != 0 || !handled || out.String() != "codex-tasks "+version+"\n" {

@@ -4,11 +4,25 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"time"
 )
 
 func render(w io.Writer, r Result, asJSON bool) {
 	if asJSON {
 		_ = json.NewEncoder(w).Encode(r)
+		return
+	}
+	if r.Summary != nil {
+		fmt.Fprintf(w, "Batch %s: %d succeeded, %d failed, %d uncertain, %d unattempted.\n", r.Action, r.Summary.Succeeded, r.Summary.Failed, r.Summary.Unknown, r.Summary.Unattempted)
+		for _, item := range r.Results {
+			fmt.Fprintf(w, "%s %s/%s: %s\n", clean(item.Task.ID, 100), clean(item.Host, 80), clean(item.Account, 80), clean(item.Outcome, 80))
+			if item.Error != "" {
+				fmt.Fprintln(w, clean(item.Error, 1200))
+			}
+		}
+		if r.Error != "" {
+			fmt.Fprintln(w, r.Error)
+		}
 		return
 	}
 	location := clean(r.Host, 80) + "/" + clean(r.Account, 80)
@@ -41,6 +55,12 @@ func render(w io.Writer, r Result, asJSON bool) {
 			name = "Untitled task"
 		}
 		fmt.Fprintf(w, "\n%s\nTask ID: %s\nTarget: %s\n", name, clean(t.ID, 100), target)
+		if t.CreatedAt != nil {
+			fmt.Fprintln(w, "Created:", time.Unix(*t.CreatedAt, 0).UTC().Format(time.RFC3339))
+		}
+		if t.UpdatedAt != nil {
+			fmt.Fprintln(w, "Updated:", time.Unix(*t.UpdatedAt, 0).UTC().Format(time.RFC3339))
+		}
 		if t.Status.Type != "" {
 			fmt.Fprintf(w, "Status: %s\n", clean(t.Status.Type, 80))
 		}

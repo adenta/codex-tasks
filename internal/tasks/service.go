@@ -11,6 +11,8 @@ import (
 )
 
 type Task struct {
+	CreatedAt            *int64  `json:"createdAt,omitempty"`
+	UpdatedAt            *int64  `json:"updatedAt,omitempty"`
 	Path                 string  `json:"path,omitempty"`
 	Host                 string  `json:"host,omitempty"`
 	Account              string  `json:"account,omitempty"`
@@ -45,31 +47,33 @@ type Item struct {
 	ContinuationCursor string `json:"continuation_cursor,omitempty"`
 }
 type Result struct {
-	AttachmentDirectory string     `json:"attachment_directory,omitempty"`
-	Coverage            []Coverage `json:"coverage,omitempty"`
-	SearchComplete      *bool      `json:"search_complete,omitempty"`
-	OmittedItems        int        `json:"omitted_items,omitempty"`
-	ItemFound           *bool      `json:"item_found,omitempty"`
-	Created             bool       `json:"created,omitempty"`
-	OperationID         string     `json:"operation_id"`
-	Host                string     `json:"host"`
-	Account             string     `json:"account"`
-	Action              string     `json:"action"`
-	Outcome             string     `json:"outcome"`
-	InputAccepted       bool       `json:"input_accepted,omitempty"`
-	ErrorCategory       string     `json:"error_category,omitempty"`
-	Error               string     `json:"error,omitempty"`
-	Task                *Task      `json:"task,omitempty"`
-	Tasks               []Task     `json:"tasks,omitempty"`
-	Projects            []Project  `json:"projects,omitempty"`
-	Items               []Item     `json:"items,omitempty"`
-	NextCursor          string     `json:"next_cursor,omitempty"`
-	TurnID              string     `json:"turn_id,omitempty"`
-	TurnStatus          string     `json:"turn_status,omitempty"`
-	Attention           string     `json:"attention,omitempty"`
-	Worktree            string     `json:"worktree,omitempty"`
-	ProjectID           string     `json:"project_id,omitempty"`
-	Mode                string     `json:"mode,omitempty"`
+	Results             []Result      `json:"results,omitempty"`
+	Summary             *BatchSummary `json:"summary,omitempty"`
+	AttachmentDirectory string        `json:"attachment_directory,omitempty"`
+	Coverage            []Coverage    `json:"coverage,omitempty"`
+	SearchComplete      *bool         `json:"search_complete,omitempty"`
+	OmittedItems        int           `json:"omitted_items,omitempty"`
+	ItemFound           *bool         `json:"item_found,omitempty"`
+	Created             bool          `json:"created,omitempty"`
+	OperationID         string        `json:"operation_id"`
+	Host                string        `json:"host"`
+	Account             string        `json:"account"`
+	Action              string        `json:"action"`
+	Outcome             string        `json:"outcome"`
+	InputAccepted       bool          `json:"input_accepted,omitempty"`
+	ErrorCategory       string        `json:"error_category,omitempty"`
+	Error               string        `json:"error,omitempty"`
+	Task                *Task         `json:"task,omitempty"`
+	Tasks               []Task        `json:"tasks,omitempty"`
+	Projects            []Project     `json:"projects,omitempty"`
+	Items               []Item        `json:"items,omitempty"`
+	NextCursor          string        `json:"next_cursor,omitempty"`
+	TurnID              string        `json:"turn_id,omitempty"`
+	TurnStatus          string        `json:"turn_status,omitempty"`
+	Attention           string        `json:"attention,omitempty"`
+	Worktree            string        `json:"worktree,omitempty"`
+	ProjectID           string        `json:"project_id,omitempty"`
+	Mode                string        `json:"mode,omitempty"`
 }
 
 type rpc interface {

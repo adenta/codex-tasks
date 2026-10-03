@@ -11,9 +11,15 @@ var commandHelp = map[string]string{
 	"targets": `targets
 Print local and configured remote targets as JSON without a network request.
 The local entry has local: true and the actual OS hostname/account.`,
-	"find": `find --query TEXT [--archive all|active|archived] [--limit N] [--cursor CURSOR]
+	"find": `find [--query TEXT] [--archived=true|false] [--updated-before TIMESTAMP]
+     [--limit N] [--cursor CURSOR]
 Search IDs, codex://threads/UUID links, titles and initial previews on configured sources.
 This is not full-history search; words that appear only in later turns do not match.
+Requires --query or --updated-before. --updated-before takes an RFC3339 timestamp
+with timezone, for example 2026-10-01T12:00:00Z. Matches server updatedAt strictly
+before the cutoff; missing timestamps do not match. UUIDs do not determine age.
+--archived=false selects unarchived tasks; --archived=true selects archives.
+Legacy --archive all|active|archived is supported; do not combine with --archived.
 Includes archives by default; limit 20 per source (1–100), scan bound 1000 entries.
 Follow every next_cursor with unchanged query, filters and selectors. Coverage
 may be incomplete even when a match is found. Uses stock thread/list and exact
@@ -73,12 +79,24 @@ Example: codex-tasks progress TASK_UUID --turn TURN_UUID --wait 30s`,
 Change subsequent-turn mode while preserving model/reasoning/permissions.
 Does not interrupt current work. May resume an unloaded task.
 Example: codex-tasks mode TASK_UUID --mode plan`,
-	"archive": `archive TASK
+	"archive": `archive TASK [TASK ...] | archive --tasks-file FILE|-
 Archive through the app server. Refuses currently active tasks. The server may
 also archive spawned descendants; inspect the task family before acting.
+Multiple IDs share the selected target (default local). --tasks-file accepts a
+JSON task array or find result with id, host, account per task; - reads stdin.
+Do not combine file input with IDs or target selectors. Maximum 1 MiB and 1000
+distinct tasks; duplicate identities are processed once. [] is a successful no-op.
+Validate all routes before mutation. Reuse one connection per target, process
+sequentially with a 30s deadline per task, and continue definitive rejections.
+Uncertain delivery or lost transport stops that target without replay; other
+targets continue. Batch results report every task, including unattempted entries.
+Search is the preview: collect needed pages before acting. File input acts only
+on its supplied tasks, regardless of discovery coverage. Runtime status is
+rechecked; timestamps are not re-filtered. No age filters apply to archive.
 Example: codex-tasks archive TASK_UUID`,
-	"unarchive": `unarchive TASK
-Restore an archived task through the app server.
+	"unarchive": `unarchive TASK [TASK ...] | unarchive --tasks-file FILE|-
+Restore archived tasks through the app server. Batch inputs, limits, routing,
+per-task reporting and failure handling are the same as archive (see help archive).
 Example: codex-tasks unarchive TASK_UUID`,
 	"config": `Configuration (no configuration changes are made by this help command)
 Read $CODEX_TASKS_CONFIG, otherwise $XDG_CONFIG_HOME/codex-tasks/config.json
@@ -105,8 +123,8 @@ fail explicitly. No task recreation or automatic mutation retry is attempted.`,
 const commonHelp = `
 Common options: --target local|HOST/ACCOUNT or --host HOST (mutually exclusive),
 --json (one result object).
-TASK accepts a UUID or codex://threads/UUID. Put flags after TASK, or TASK after
-all flags. With no selector commands use the local account; find searches all
+TASK accepts a UUID or codex://threads/UUID. Put flags after all task IDs, or
+all task IDs after flags. With no selector commands use the local account; find searches all
 configured sources. --target local restricts find to the current account.
 Messages: --message-file FILE or - for stdin, maximum 1 MiB. Shell-quote text;
 prefer a file/stdin for multiline messages. --wait defaults to 0s, maximum 60s.

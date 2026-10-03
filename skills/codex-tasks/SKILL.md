@@ -34,7 +34,7 @@ codex-tasks read TASK_ID --target grace/agent --limit 20
 
 Output is English by default. Use `--json` for scripts. General `codex-tasks find` searches task titles
 and initial previews only; never describe it as full-text search. It includes archives;
-`--archive active` or `--archive archived` narrows it. Follow every returned cursor needed for the
+`--archived=false` or `--archived=true` narrows it. Follow every returned cursor needed for the
 search. Report searched sources, unavailable sources, and remaining pages. Coverage is limited to the
 tasks exposed by the stock server. A negative fallback result is inconclusive when coverage is
 incomplete and does not establish that a hidden task is absent. Old search cursors must be discarded;
@@ -42,6 +42,30 @@ restart without `--cursor`.
 When multiple tasks or locations match, obtain a task ID and target selection
 before acting. Keep original titles, project IDs, and workspace paths as returned.
 Project IDs and paths belong to the owning machine/account.
+
+Search by last-update time with `--updated-before` and an RFC3339 timestamp including
+its timezone. The text query is optional when this filter is supplied. `createdAt`
+and `updatedAt` are Unix seconds reported by the server, not extracted from UUIDs.
+The cutoff is strict; tasks with unknown timestamps do not match.
+
+```sh
+codex-tasks find --archived=false --updated-before 2026-10-01T12:00:00Z --json
+```
+
+For authorized batch archive/restore, pass multiple task IDs on one selected target,
+or use `--tasks-file FILE|-` with a JSON task array or discovery result. Every JSON
+entry must retain its explicit `id`, `host`, and `account`; do not combine file input
+with global selectors. Collect every needed search page and report incomplete
+coverage before claiming the selection is complete. File input acts only on the
+supplied tasks; it does not continue discovery. Search serves as the preview.
+
+Each batch validates routes before mutation, deduplicates identities, and reuses one
+connection per target. A definitive rejection permits other tasks to continue;
+uncertain delivery stops that target and leaves remaining entries unattempted.
+Other targets continue. Inspect per-task results; never replay the whole batch
+blindly. Empty arrays succeed without connecting; limits are 1000 distinct tasks
+and 1 MiB. Archive rechecks runtime status but does not reapply search timestamps.
+The server may also archive spawned descendants; inspect the family before acting.
 
 Task IDs and `codex://threads/UUID` links are accepted. `--target HOST/ACCOUNT`
 selects an explicit endpoint; `--host HOST` uses the calling account's configured
@@ -110,7 +134,8 @@ Read outcomes literally:
 - `needs_attention` means to surface the task's approval/input request.
 - `unknown` means delivery could not be established. Inspect the target and its
   recent messages before retrying. Never blindly replay a mutation after SSH loss.
-- `partial` means the task was created but a later step failed. Preserve the returned task/project/worktree
+- Batch `partial` means some tasks failed or were unattempted; inspect `results` and `summary`.
+- For creation, `partial` means the task was created but a later step failed. Preserve the returned task/project/worktree
   IDs and inspect them before another create. A retained unattached worktree is
   removable only after confirming no task uses it and no work would be lost.
 

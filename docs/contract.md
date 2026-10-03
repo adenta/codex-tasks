@@ -106,3 +106,45 @@ The packaged skill is reviewed against those scenarios and its command examples
 are parsed during tests. These checks do not establish model compliance with
 instructions; model-backed skill evaluations require separate authorization.
 Native desktop tools are outside the fake-SSH test coverage.
+
+## Timestamp discovery and batch actions (1.1)
+
+Task `createdAt` and `updatedAt` are optional upstream Unix timestamps in seconds.
+English output renders UTC RFC3339 timestamps. `find --updated-before TIMESTAMP`
+accepts an RFC3339 timestamp with timezone (including fractional seconds), compares
+strictly against server `updatedAt`, and excludes missing timestamps. It permits
+omitting `--query`; text and time filters combine when both are present.
+`--archived=false` selects unarchived tasks and `--archived=true` archived tasks;
+omission searches both. The existing `--archive` option remains supported but
+cannot be combined with `--archived`. Search cursors bind the normalized cutoff,
+text, archive filter, and source scope. Restart older-version cursors.
+
+`archive` and `unarchive` accept multiple positional IDs or task links on a single
+selected target. `--tasks-file FILE|-` instead reads a JSON task array or one find
+result's `tasks` array, with `id`, `host`, and `account` required per entry. Extra
+metadata is ignored. File input cannot be combined with IDs or target selectors.
+Limits are 1 MiB and 1000 distinct host/account/ID identities; duplicates collapse.
+An empty array succeeds without connections. Input and configured routes are
+validated before any mutation. The file represents an explicit selection, not an
+instruction to fetch additional pages or reapply search filters.
+
+Batch JSON retains the top-level result envelope and adds `results` (per-task
+results with original ID, host, account, outcome/error) and `summary` counts:
+`succeeded`, `failed`, `unknown`, `unattempted`. Top-level host/account identifies
+the invoker; per-task host/account identifies the mutation destination. Results are
+grouped by target in first-appearance order, preserving order within each target.
+Single positional-task commands keep their existing output contract.
+
+The client reuses a verified connection per target, performs actions sequentially,
+and gives each task 30 seconds. Archive refuses currently running tasks. Definitive
+rejections do not stop subsequent tasks. Uncertain delivery or a broken connection
+stops that target; remaining entries are `unattempted`, and other targets continue.
+No mutation is replayed. A failure before connection establishment leaves every
+entry for that target unattempted. Cancellation leaves remaining tasks unattempted.
+The server may also archive spawned descendants, as with single-task archive.
+
+Batch exit codes: 0 all succeeded (including empty input); 1 definitive failures or
+unattempted entries; 2 invalid input/configured routes before mutation; 3 any uncertain
+mutation. Aggregate outcome is `ok`, `partial` (successes plus failures/unattempted),
+`failed` (no successes), or `unknown` (any uncertain mutation). Inspect per-task
+results before retrying; an operation ID is not a retry key.

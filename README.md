@@ -218,3 +218,33 @@ absolute `--cwd`.
 Unversioned development builds previously wrote model caches, setup logs, and
 activity logs. Version 1.0.0 no longer reads or writes them and does not delete
 those existing files automatically.
+
+## Search by update time and archive batches
+
+```sh
+codex-tasks find --archived=false --updated-before 2026-10-01T12:00:00Z --json
+codex-tasks archive TASK_UUID OTHER_TASK_UUID --target server/agent
+codex-tasks unarchive TASK_UUID OTHER_TASK_UUID --target server/agent
+codex-tasks archive --tasks-file selected.json --json
+```
+
+`--updated-before` takes a standard RFC3339 timestamp with a timezone. It filters
+server-reported last update time, strictly before the cutoff; it does not derive
+age from IDs. Missing update times do not match. Search returns `createdAt` and
+`updatedAt` as Unix seconds and shows readable timestamps in English output.
+`--archived=false` means unarchived, regardless of whether a task is running.
+
+Search is the preview. Follow its cursors with unchanged filters, check coverage,
+and collect the desired tasks into a JSON array before acting. A single discovery
+result is also accepted, but only its returned page is acted on. For example:
+
+```json
+[{"id":"00000000-0000-4000-8000-000000000001","host":"server","account":"agent"}]
+```
+
+Use `--tasks-file -` for stdin. Each JSON task must retain its host/account; file
+input cannot be combined with IDs or global target selectors. Batches accept up to
+1000 distinct tasks and 1 MiB, deduplicate identities, and reuse one connection per
+target. Empty arrays succeed without connections. No mutation is retried; uncertain
+delivery stops that target and reports its remaining tasks as unattempted. Other
+targets continue. Inspect `results` and `summary` before choosing any retry.

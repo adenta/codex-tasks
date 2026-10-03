@@ -101,6 +101,13 @@ func TestStockStreamPeer(t *testing.T) {
 				result = map[string]any{"thread": map[string]any{"id": req.Params["threadId"], "status": map[string]any{"type": "idle"}, "canAcceptDirectInput": true}}
 			case "thread/start":
 				result = map[string]any{"thread": map[string]any{"id": "00000000-0000-4000-8000-000000000001", "cwd": req.Params["cwd"]}}
+			case "thread/archive", "thread/unarchive":
+				if mode == "disconnect" {
+					os.Exit(0)
+				}
+				if mode == "rejected" {
+					failure = map[string]any{"code": -32000, "message": "fixture rejected"}
+				}
 			case "turn/start":
 				if mode == "disconnect" {
 					os.Exit(0)
@@ -257,5 +264,63 @@ func TestMissingStockProxy(t *testing.T) {
 	calls, _ := os.ReadFile(marker)
 	if string(calls) != "x" {
 		t.Fatal("retried missing proxy", string(calls))
+	}
+}
+
+func TestRemoteBatchConnectionReuseAndFailure(t *testing.T) {
+	for _, mode := range []string{"success", "wrong-host", "wrong-account", "disconnect", "rejected", "pre-disconnect"} {
+		t.Run(mode, func(t *testing.T) {
+			root := t.TempDir()
+			bin := filepath.Join(root, "bin")
+			if err := os.Mkdir(bin, 0700); err != nil {
+				t.Fatal(err)
+			}
+			script := "#!/bin/sh\nexec " + shellQuote(os.Args[0]) + " -test.run=^TestStockStreamPeer$\n"
+			if err := os.WriteFile(filepath.Join(bin, "ssh"), []byte(script), 0700); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
+			t.Setenv("TASKS_STOCK_PEER", "1")
+			t.Setenv("TASKS_PEER_ROOT", root)
+			t.Setenv("TASKS_PEER_MODE", mode)
+			p := endpoints.Config{Host: "client", Account: "local", CodexHome: root, Targets: []endpoints.Target{{Host: "server", Account: "agent", Alias: "configured-alias"}}}
+			o := opts("archive", "")
+			o.Target = "server/agent"
+			o.Batch = true
+			o.JSON = true
+			o.BatchTasks = []Task{{ID: batchID1}, {ID: batchID2}}
+			var out, stderr strings.Builder
+			code := run(context.Background(), p, o, &out, &stderr)
+			requests, err := os.ReadFile(filepath.Join(root, "requests"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			calls := string(requests)
+			if strings.Count(calls, "initialize\n") != 1 {
+				t.Fatal("did not reuse connection", calls)
+			}
+			var r Result
+			if err := json.Unmarshal([]byte(out.String()), &r); err != nil {
+				t.Fatal(err, out.String())
+			}
+			switch mode {
+			case "success":
+				if code != 0 || r.Summary.Succeeded != 2 || strings.Count(calls, "thread/archive\n") != 2 {
+					t.Fatal(code, r, calls)
+				}
+			case "disconnect":
+				if code != 3 || r.Summary.Unknown != 1 || r.Summary.Unattempted != 1 || strings.Count(calls, "thread/archive\n") != 1 {
+					t.Fatal(code, r, calls)
+				}
+			case "rejected":
+				if code != 1 || r.Summary.Failed != 2 || strings.Count(calls, "thread/archive\n") != 2 {
+					t.Fatal(code, r, calls)
+				}
+			default:
+				if code != 1 || r.Summary.Unattempted != 2 || strings.Contains(calls, "thread/") {
+					t.Fatal(code, r, calls)
+				}
+			}
+		})
 	}
 }

@@ -69,6 +69,15 @@ type Client struct {
 	done           chan struct{}
 }
 
+func (c *Client) connectionFailed() bool {
+	select {
+	case <-c.done:
+		return true
+	default:
+		return false
+	}
+}
+
 func Dial(ctx context.Context, socket string) (*Client, error) {
 	info, err := os.Lstat(socket)
 	if err != nil {

@@ -23,19 +23,21 @@ type Coverage struct {
 	Detail string `json:"detail,omitempty"`
 }
 type findPosition struct {
-	Version  int    `json:"version"`
-	Cursor   string `json:"cursor"`
-	Archived bool   `json:"archived"`
-	Query    string `json:"query"`
-	Archive  string `json:"archive"`
+	Version       int    `json:"version"`
+	UpdatedBefore string `json:"updated_before,omitempty"`
+	Cursor        string `json:"cursor"`
+	Archived      bool   `json:"archived"`
+	Query         string `json:"query"`
+	Archive       string `json:"archive"`
 }
 type findCursor struct {
-	Version int               `json:"version"`
-	Query   string            `json:"query"`
-	Archive string            `json:"archive"`
-	Scope   string            `json:"scope"`
-	Sources map[string]string `json:"sources"`
-	Matches int               `json:"matches"`
+	Version       int               `json:"version"`
+	UpdatedBefore string            `json:"updated_before,omitempty"`
+	Query         string            `json:"query"`
+	Archive       string            `json:"archive"`
+	Scope         string            `json:"scope"`
+	Sources       map[string]string `json:"sources"`
+	Matches       int               `json:"matches"`
 }
 
 func encodeCursor(v any) string {
@@ -52,13 +54,13 @@ func decodeCursor(s string, v any) error {
 
 // Search uses only stock task methods. Coverage is limited to the server's view.
 func (s *service) find(ctx context.Context, o Options, r *Result) error {
-	pos := findPosition{Version: 2, Archived: o.Archive == "archived", Query: o.Query, Archive: o.Archive}
+	pos := findPosition{Version: 3, UpdatedBefore: o.UpdatedBefore, Archived: o.Archive == "archived", Query: o.Query, Archive: o.Archive}
 	if o.Cursor != "" {
 		pos = findPosition{}
 		if err := decodeCursor(o.Cursor, &pos); err != nil {
 			return err
 		}
-		if pos.Version != 2 || pos.Query != o.Query || pos.Archive != o.Archive {
+		if pos.Version != 3 || pos.UpdatedBefore != o.UpdatedBefore || pos.Query != o.Query || pos.Archive != o.Archive {
 			return fmt.Errorf("search cursor is obsolete or belongs to another query; restart the search without --cursor")
 		}
 	}
@@ -69,7 +71,7 @@ func (s *service) find(ctx context.Context, o Options, r *Result) error {
 			return err
 		}
 		if o.Archive == "" || o.Archive == "all" || task.Path != "" {
-			if o.Archive == "" || o.Archive == "all" || (o.Archive == "archived") == task.Archived {
+			if matchesUpdatedBefore(task, o.UpdatedBefore) && (o.Archive == "" || o.Archive == "all" || (o.Archive == "archived") == task.Archived) {
 				r.Tasks = append(r.Tasks, task)
 			}
 			return nil
@@ -112,7 +114,7 @@ func (s *service) find(ctx context.Context, o Options, r *Result) error {
 					}
 				}
 			}
-			if match {
+			if match && matchesUpdatedBefore(task, o.UpdatedBefore) {
 				task.Archived = pos.Archived
 				r.Tasks = append(r.Tasks, task)
 			}
@@ -139,13 +141,13 @@ func discover(ctx context.Context, p endpoints.Config, o Options, r *Result, exe
 	o = localTarget(p, o)
 	encoded, _ := json.Marshal(p)
 	scope := fmt.Sprintf("%s/%s|%s|%s|%x", p.Host, p.Account, o.Host, o.Target, sha256.Sum256(encoded))
-	state := findCursor{Version: 2, Query: o.Query, Archive: o.Archive, Scope: scope, Sources: map[string]string{}}
+	state := findCursor{Version: 3, UpdatedBefore: o.UpdatedBefore, Query: o.Query, Archive: o.Archive, Scope: scope, Sources: map[string]string{}}
 	if o.Cursor != "" {
 		state = findCursor{}
 		if err := decodeCursor(o.Cursor, &state); err != nil {
 			return err
 		}
-		if state.Version != 2 || state.Query != o.Query || state.Archive != o.Archive || state.Scope != scope || state.Sources == nil || state.Matches < 0 {
+		if state.Version != 3 || state.UpdatedBefore != o.UpdatedBefore || state.Query != o.Query || state.Archive != o.Archive || state.Scope != scope || state.Sources == nil || state.Matches < 0 {
 			return fmt.Errorf("search cursor is obsolete or belongs to another query, filter, or account; restart the search without --cursor")
 		}
 	}
@@ -226,4 +228,12 @@ func discover(ctx context.Context, p endpoints.Config, o Options, r *Result, exe
 		r.NextCursor = encodeCursor(state)
 	}
 	return nil
+}
+
+func matchesUpdatedBefore(t Task, before string) bool {
+	if before == "" {
+		return true
+	}
+	cutoff, err := time.Parse(time.RFC3339Nano, before)
+	return err == nil && t.UpdatedAt != nil && time.Unix(*t.UpdatedAt, 0).Before(cutoff)
 }

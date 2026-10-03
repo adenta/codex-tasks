@@ -19,7 +19,8 @@ import (
 
 const maxMessage = 1 << 20
 const help = `Usage: codex-tasks OPERATION [TASK] [OPTIONS]
-  find --query TEXT [--archive all|active|archived] [--limit N] [--cursor CURSOR]
+  find [--query TEXT] [--archived=true|false] [--updated-before TIMESTAMP]
+     [--limit N] [--cursor CURSOR]
   projects | list [--project ID] [--archived] [--limit N] [--cursor CURSOR]
   read TASK [--turn ID] [--limit N] [--cursor CURSOR]
        [--item ID --offset N] [--max-chars N] [--include-outputs]
@@ -31,7 +32,8 @@ const help = `Usage: codex-tasks OPERATION [TASK] [OPTIONS]
   message TASK [--message-file FILE|-] [--image FILE ...] [--wait DURATION]
   progress TASK [--turn ID] [--wait DURATION]
   mode TASK --mode plan|default
-  archive TASK | unarchive TASK
+  archive TASK [TASK ...] | unarchive TASK [TASK ...]
+  archive --tasks-file FILE|- | unarchive --tasks-file FILE|-
 Common: --target local|HOST/ACCOUNT or --host HOST; --json for scripts.
 Defaults: English output; find searches inventory, other commands use the local account.
 20 results per source/page, no wait; --wait is at most 60s.
@@ -39,6 +41,10 @@ Native desktop task tools remain necessary for desktop-only targets and handoff.
 `
 
 type Options struct {
+	UpdatedBefore   string        `json:"updated_before,omitempty"`
+	TaskIDs         []string      `json:"task_ids,omitempty"`
+	BatchTasks      []Task        `json:"batch_tasks,omitempty"`
+	Batch           bool          `json:"batch,omitempty"`
 	ReasoningEffort string        `json:"reasoning_effort,omitempty"`
 	Target          string        `json:"target,omitempty"`
 	Query           string        `json:"query,omitempty"`
@@ -89,6 +95,7 @@ func parse(args []string, stdin io.Reader) (Options, error) {
 	fs.StringVar(&o.Host, "host", "", "configured host")
 	fs.StringVar(&o.Target, "target", "", "local or host/account")
 	fs.StringVar(&o.Query, "query", "", "task link, ID, or title/preview words")
+	fs.StringVar(&o.UpdatedBefore, "updated-before", "", "last updated before an RFC3339 timestamp")
 	fs.StringVar(&o.Archive, "archive", "", "all, active, or archived")
 	fs.StringVar(&o.ItemID, "item", "", "read one history item")
 	fs.IntVar(&o.Offset, "offset", 0, "character offset within --item")
@@ -112,6 +119,8 @@ func parse(args []string, stdin io.Reader) (Options, error) {
 	fs.StringVar(&o.TurnID, "turn", "", "turn UUID")
 	fs.DurationVar(&o.Wait, "wait", 0, "bounded progress wait")
 	var messageFile string
+	var tasksFile string
+	fs.StringVar(&tasksFile, "tasks-file", "", "JSON task array or discovery result; - for stdin")
 	fs.StringVar(&messageFile, "message-file", "", "file or - for stdin")
 	fs.Func("image", "local PNG/JPEG file (repeatable)", func(value string) error {
 		path, err := filepath.Abs(value)
@@ -121,24 +130,26 @@ func parse(args []string, stdin io.Reader) (Options, error) {
 		return err
 	})
 	tail := args[1:]
+	batchAction := o.Action == "archive" || o.Action == "unarchive"
 	// Accept the documented OPERATION TASK --flags form as well as flags first.
-	if len(tail) > 0 && !strings.HasPrefix(tail[0], "-") {
-		o.TaskID = tail[0]
+	for len(tail) > 0 && !strings.HasPrefix(tail[0], "-") {
+		o.TaskIDs = append(o.TaskIDs, tail[0])
 		tail = tail[1:]
 	}
 	if err := fs.Parse(tail); err != nil {
 		return o, err
 	}
-	if fs.NArg() > 0 {
-		if o.TaskID != "" || fs.NArg() != 1 {
-			return o, fmt.Errorf("expected one task ID")
-		}
-		o.TaskID = fs.Arg(0)
+	o.TaskIDs = append(o.TaskIDs, fs.Args()...)
+	if !batchAction && len(o.TaskIDs) > 1 {
+		return o, fmt.Errorf("expected one task ID")
+	}
+	if len(o.TaskIDs) == 1 {
+		o.TaskID = o.TaskIDs[0]
 	}
 	allowed := map[string]string{
-		"find": "query archive limit cursor", "projects": "limit cursor", "list": "project archived limit cursor", "read": "turn limit cursor item offset max-chars include-outputs",
+		"find": "query archive archived updated-before limit cursor", "projects": "limit cursor", "list": "project archived limit cursor", "read": "turn limit cursor item offset max-chars include-outputs",
 		"create": "cwd project projectless checkout ref title model model-provider model-context-window reasoning-effort mode message-file image wait", "fork": "title mode",
-		"message": "message-file image wait", "progress": "turn wait", "mode": "mode", "archive": "", "unarchive": "",
+		"message": "message-file image wait", "progress": "turn wait", "mode": "mode", "archive": "tasks-file", "unarchive": "tasks-file",
 	}
 	names, ok := allowed[o.Action]
 	if !ok {
@@ -152,6 +163,62 @@ func parse(args []string, stdin io.Reader) (Options, error) {
 	})
 	if bad != "" {
 		return o, fmt.Errorf("--%s is not valid for %s", bad, o.Action)
+	}
+	if o.Action == "find" {
+		archivedSet, archiveSet := false, false
+		fs.Visit(func(f *flag.Flag) {
+			archivedSet = archivedSet || f.Name == "archived"
+			archiveSet = archiveSet || f.Name == "archive"
+		})
+		if archivedSet && archiveSet {
+			return o, fmt.Errorf("choose --archived or --archive, not both")
+		}
+		if archivedSet {
+			o.Archive = "active"
+			if o.Archived {
+				o.Archive = "archived"
+			}
+		}
+	}
+	if o.UpdatedBefore != "" {
+		cutoff, err := time.Parse(time.RFC3339Nano, o.UpdatedBefore)
+		if err != nil {
+			return o, fmt.Errorf("--updated-before requires an RFC3339 timestamp with timezone")
+		}
+		o.UpdatedBefore = cutoff.UTC().Format(time.RFC3339Nano)
+	}
+	if tasksFile != "" {
+		if len(o.TaskIDs) != 0 || o.Host != "" || o.Target != "" {
+			return o, fmt.Errorf("--tasks-file cannot be combined with task IDs or target selectors")
+		}
+		var reader io.Reader = stdin
+		if tasksFile != "-" {
+			f, err := os.Open(tasksFile)
+			if err != nil {
+				return o, err
+			}
+			defer f.Close()
+			reader = f
+		}
+		var err error
+		o.BatchTasks, err = readBatchTasks(reader)
+		if err != nil {
+			return o, err
+		}
+		o.Batch = true
+	} else if batchAction && len(o.TaskIDs) > 1 {
+		o.Batch = true
+		for _, id := range o.TaskIDs {
+			o.BatchTasks = append(o.BatchTasks, Task{ID: id})
+		}
+	}
+	if o.Batch {
+		var err error
+		o.BatchTasks, err = normalizeBatch(o.BatchTasks, tasksFile != "")
+		if err != nil {
+			return o, err
+		}
+		o.TaskID = ""
 	}
 	if messageFile != "" {
 		var reader io.Reader = stdin
@@ -194,8 +261,8 @@ func validate(o Options) error {
 			}
 		}
 	}
-	if o.Action == "find" && (strings.TrimSpace(o.Query) == "" || len(o.Query) > 1000) {
-		return fmt.Errorf("find requires --query with 1–1000 bytes")
+	if o.Action == "find" && ((strings.TrimSpace(o.Query) == "" && o.UpdatedBefore == "") || len(o.Query) > 1000) {
+		return fmt.Errorf("find requires --query with 1–1000 bytes or --updated-before")
 	}
 	if o.Archive != "" && o.Archive != "all" && o.Archive != "active" && o.Archive != "archived" {
 		return fmt.Errorf("archive must be all, active, or archived")
@@ -252,7 +319,7 @@ func validate(o Options) error {
 			return fmt.Errorf("%s does not accept a positional task ID", o.Action)
 		}
 	case "read", "fork", "message", "progress", "mode", "archive", "unarchive":
-		if _, err := taskID(o.TaskID); err != nil {
+		if _, err := taskID(o.TaskID); err != nil && !o.Batch {
 			return err
 		}
 	default:
@@ -312,6 +379,9 @@ func Run(paths endpoints.Config, args []string, stdin io.Reader, stdout, stderr 
 }
 
 func run(ctx context.Context, paths endpoints.Config, o Options, stdout, stderr io.Writer) int {
+	if o.Batch {
+		return runBatch(ctx, paths, o, stdout, executeBatchAt)
+	}
 	o = localTarget(paths, o)
 	target := string(paths.Host)
 	if o.Host != "" {
