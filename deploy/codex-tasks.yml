@@ -1,0 +1,454 @@
+---
+- name: Validate and build the selected Codex Tasks source
+  hosts: codex_tasks_callers
+  gather_facts: false
+  vars:
+    codex_tasks_repo_root: "{{ playbook_dir | dirname }}"
+  tasks:
+    - name: Validate and build once on the controller
+      run_once: true
+      delegate_to: localhost
+      become: false
+      block:
+        - name: Inspect the source checkout
+          ansible.builtin.command:
+            argv:
+              - git
+              - status
+              - --porcelain
+              - --untracked-files=normal
+            chdir: "{{ codex_tasks_repo_root }}"
+          changed_when: false
+          check_mode: false
+          register: codex_tasks_git_status
+
+        - name: Require a clean committed checkout
+          ansible.builtin.assert:
+            that:
+              - codex_tasks_git_status.stdout == ""
+            fail_msg: >-
+              Refusing to deploy a dirty checkout. Commit the exact source that
+              should be deployed, then run the playbook again.
+
+        - name: Read the source commit
+          ansible.builtin.command:
+            argv:
+              - git
+              - rev-parse
+              - HEAD
+            chdir: "{{ codex_tasks_repo_root }}"
+          changed_when: false
+          check_mode: false
+          register: codex_tasks_git_commit
+
+        - name: Read the project version
+          ansible.builtin.slurp:
+            src: "{{ codex_tasks_repo_root }}/VERSION"
+          check_mode: false
+          register: codex_tasks_version_file
+
+        - name: Locate the managed stock Codex executable
+          ansible.builtin.command:
+            argv:
+              - which
+              - codex
+          changed_when: false
+          check_mode: false
+          register: codex_tasks_stock_codex
+
+        - name: Run the unit test suite
+          ansible.builtin.command:
+            argv:
+              - go
+              - test
+              - ./...
+            chdir: "{{ codex_tasks_repo_root }}"
+          changed_when: false
+          check_mode: false
+
+        - name: Run Go vet
+          ansible.builtin.command:
+            argv:
+              - go
+              - vet
+              - ./...
+            chdir: "{{ codex_tasks_repo_root }}"
+          changed_when: false
+          check_mode: false
+
+        - name: Run the isolated stock lifecycle test
+          ansible.builtin.command:
+            argv:
+              - go
+              - test
+              - ./internal/tasks
+              - -run
+              - ^TestStockTaskLifecycle$
+              - -count=1
+            chdir: "{{ codex_tasks_repo_root }}"
+          environment:
+            CODEX_TASKS_TEST_CODEX: "{{ codex_tasks_stock_codex.stdout }}"
+          changed_when: false
+          check_mode: false
+
+        - name: Build the versioned executable
+          ansible.builtin.command:
+            argv:
+              - make
+              - build
+            chdir: "{{ codex_tasks_repo_root }}"
+          changed_when: false
+          check_mode: false
+
+        - name: Publish source facts to the deployment play
+          ansible.builtin.set_fact:
+            codex_tasks_source_commit: "{{ codex_tasks_git_commit.stdout }}"
+            codex_tasks_source_version: >-
+              {{ codex_tasks_version_file.content | b64decode | trim }}
+            codex_tasks_built_binary: "{{ codex_tasks_repo_root }}/build/codex-tasks"
+            codex_tasks_source_skill: "{{ codex_tasks_repo_root }}/skills/codex-tasks"
+          delegate_facts: true
+
+- name: Deploy Codex Tasks to caller accounts
+  hosts: codex_tasks_callers
+  order: inventory
+  serial: 1
+  any_errors_fatal: true
+  gather_facts: false
+  vars:
+    codex_tasks_source_commit: "{{ hostvars.localhost.codex_tasks_source_commit }}"
+    codex_tasks_source_version: "{{ hostvars.localhost.codex_tasks_source_version }}"
+    codex_tasks_built_binary: "{{ hostvars.localhost.codex_tasks_built_binary }}"
+    codex_tasks_source_skill: "{{ hostvars.localhost.codex_tasks_source_skill }}"
+    codex_tasks_install_binary: "{{ codex_tasks_home }}/.local/bin/codex-tasks"
+    codex_tasks_install_skill: "{{ codex_tasks_skill_root }}/codex-tasks"
+    codex_tasks_state_root: "{{ codex_tasks_home }}/.local/state/codex-tasks"
+    codex_tasks_receipt: "{{ codex_tasks_state_root }}/deployments/current.json"
+  pre_tasks:
+    - name: Read the target hostname
+      ansible.builtin.command:
+        argv:
+          - hostname
+      changed_when: false
+      check_mode: false
+      register: codex_tasks_actual_hostname
+
+    - name: Read the target account
+      ansible.builtin.command:
+        argv:
+          - id
+          - -un
+      changed_when: false
+      check_mode: false
+      register: codex_tasks_actual_user
+
+    - name: Read the target architecture
+      ansible.builtin.command:
+        argv:
+          - uname
+          - -m
+      changed_when: false
+      check_mode: false
+      register: codex_tasks_actual_architecture
+
+    - name: Verify target identity and supported architecture
+      ansible.builtin.assert:
+        that:
+          - codex_tasks_actual_hostname.stdout == codex_tasks_expected_hostname
+          - codex_tasks_actual_user.stdout == codex_tasks_expected_user
+          - codex_tasks_actual_architecture.stdout == "x86_64"
+          - codex_tasks_home.startswith("/")
+          - codex_tasks_home != "/"
+          - codex_tasks_skill_root.startswith(codex_tasks_home + "/")
+        fail_msg: >-
+          Refusing to deploy: inventory expected
+          {{ codex_tasks_expected_hostname }}/{{ codex_tasks_expected_user }} on
+          x86_64 but reached {{ codex_tasks_actual_hostname.stdout }}/
+          {{ codex_tasks_actual_user.stdout }} on
+          {{ codex_tasks_actual_architecture.stdout }}.
+
+  tasks:
+    - name: Preview managed destination directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+      loop:
+        - "{{ codex_tasks_install_binary | dirname }}"
+        - "{{ codex_tasks_skill_root }}"
+        - "{{ codex_tasks_state_root }}"
+        - "{{ codex_tasks_state_root }}/deployments"
+      when: ansible_check_mode
+
+    - name: Preview executable update
+      ansible.builtin.copy:
+        src: "{{ codex_tasks_built_binary }}"
+        dest: "{{ codex_tasks_install_binary }}"
+        mode: "0755"
+      diff: false
+      when: ansible_check_mode
+
+    - name: Preview skill update
+      ansible.builtin.copy:
+        src: "{{ codex_tasks_source_skill }}/"
+        dest: "{{ codex_tasks_install_skill }}/"
+        mode: preserve
+      when: ansible_check_mode
+
+    - name: Stop this endpoint after its preview
+      ansible.builtin.meta: end_host
+      when: ansible_check_mode
+
+    - name: Create managed destination directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+      loop:
+        - "{{ codex_tasks_install_binary | dirname }}"
+        - "{{ codex_tasks_skill_root }}"
+        - "{{ codex_tasks_state_root }}"
+        - "{{ codex_tasks_state_root }}/deployments"
+
+    - name: Create a private deployment transaction directory
+      ansible.builtin.tempfile:
+        state: directory
+        path: "{{ codex_tasks_state_root }}"
+        prefix: deploy-
+      register: codex_tasks_transaction
+      changed_when: false
+
+    - name: Create the staged skill directory
+      ansible.builtin.file:
+        path: "{{ codex_tasks_transaction.path }}/new-skill"
+        state: directory
+        mode: "0755"
+      changed_when: false
+
+    - name: Stage the executable
+      ansible.builtin.copy:
+        src: "{{ codex_tasks_built_binary }}"
+        dest: "{{ codex_tasks_transaction.path }}/new-binary"
+        mode: "0755"
+      changed_when: false
+
+    - name: Stage the complete companion skill
+      ansible.builtin.copy:
+        src: "{{ codex_tasks_source_skill }}/"
+        dest: "{{ codex_tasks_transaction.path }}/new-skill/"
+        mode: preserve
+      changed_when: false
+
+    - name: Verify the staged executable version
+      ansible.builtin.command:
+        argv:
+          - "{{ codex_tasks_transaction.path }}/new-binary"
+          - --version
+      changed_when: false
+      register: codex_tasks_staged_version
+
+    - name: Verify staged release contents
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - "{{ codex_tasks_transaction.path }}/new-skill/SKILL.md"
+        - "{{ codex_tasks_transaction.path }}/new-skill/agents/openai.yaml"
+      register: codex_tasks_staged_skill_files
+
+    - name: Accept only a complete staged release
+      ansible.builtin.assert:
+        that:
+          - codex_tasks_staged_version.stdout == "codex-tasks " + codex_tasks_source_version
+          - codex_tasks_staged_skill_files.results | map(attribute='stat.isreg') | min
+        fail_msg: The staged binary or companion skill is incomplete.
+
+    - name: Inspect the current executable
+      ansible.builtin.stat:
+        path: "{{ codex_tasks_install_binary }}"
+      register: codex_tasks_previous_binary
+
+    - name: Inspect the current skill
+      ansible.builtin.stat:
+        path: "{{ codex_tasks_install_skill }}"
+      register: codex_tasks_previous_skill
+
+    - name: Compare the staged and current executable
+      ansible.builtin.command:
+        argv:
+          - cmp
+          - -s
+          - --
+          - "{{ codex_tasks_transaction.path }}/new-binary"
+          - "{{ codex_tasks_install_binary }}"
+      changed_when: false
+      failed_when: codex_tasks_binary_comparison.rc not in [0, 1]
+      when: codex_tasks_previous_binary.stat.isreg | default(false)
+      register: codex_tasks_binary_comparison
+
+    - name: Compare the staged and current skill tree
+      ansible.builtin.command:
+        argv:
+          - diff
+          - -q
+          - -r
+          - --
+          - "{{ codex_tasks_transaction.path }}/new-skill"
+          - "{{ codex_tasks_install_skill }}"
+      changed_when: false
+      failed_when: codex_tasks_skill_comparison.rc not in [0, 1]
+      when: codex_tasks_previous_skill.stat.isdir | default(false)
+      register: codex_tasks_skill_comparison
+
+    - name: Determine whether this exact release is already installed
+      ansible.builtin.set_fact:
+        codex_tasks_release_current: >-
+          {{
+            codex_tasks_binary_comparison.rc | default(1) == 0
+            and codex_tasks_previous_binary.stat.mode | default("") == "0755"
+            and codex_tasks_skill_comparison.rc | default(1) == 0
+          }}
+
+    - name: Refresh the receipt for an already-current release
+      ansible.builtin.copy:
+        dest: "{{ codex_tasks_receipt }}"
+        mode: "0600"
+        content: |
+          {
+            "commit": "{{ codex_tasks_source_commit }}",
+            "version": "{{ codex_tasks_source_version }}",
+            "inventory_host": "{{ inventory_hostname }}",
+            "hostname": "{{ codex_tasks_actual_hostname.stdout }}",
+            "account": "{{ codex_tasks_actual_user.stdout }}"
+          }
+      when: codex_tasks_release_current
+
+    - name: Remove an unnecessary deployment transaction
+      ansible.builtin.file:
+        path: "{{ codex_tasks_transaction.path }}"
+        state: absent
+      changed_when: false
+      when: codex_tasks_release_current
+
+    - name: Stop this endpoint when the exact release is current
+      ansible.builtin.meta: end_host
+      when: codex_tasks_release_current
+
+    - name: Activate and verify the staged release
+      block:
+        - name: Move the previous executable into the transaction
+          ansible.builtin.command:
+            argv:
+              - mv
+              - --
+              - "{{ codex_tasks_install_binary }}"
+              - "{{ codex_tasks_transaction.path }}/previous-binary"
+          when: codex_tasks_previous_binary.stat.exists
+
+        - name: Move the previous skill into the transaction
+          ansible.builtin.command:
+            argv:
+              - mv
+              - --
+              - "{{ codex_tasks_install_skill }}"
+              - "{{ codex_tasks_transaction.path }}/previous-skill"
+          when: codex_tasks_previous_skill.stat.exists
+
+        - name: Activate the executable
+          ansible.builtin.command:
+            argv:
+              - mv
+              - --
+              - "{{ codex_tasks_transaction.path }}/new-binary"
+              - "{{ codex_tasks_install_binary }}"
+
+        - name: Activate the companion skill
+          ansible.builtin.command:
+            argv:
+              - mv
+              - --
+              - "{{ codex_tasks_transaction.path }}/new-skill"
+              - "{{ codex_tasks_install_skill }}"
+
+        - name: Verify installed version and offline help
+          ansible.builtin.command:
+            argv:
+              - "{{ codex_tasks_install_binary }}"
+              - "{{ item }}"
+          loop:
+            - --version
+            - --help
+          changed_when: false
+          register: codex_tasks_installed_commands
+
+        - name: Accept the installed executable
+          ansible.builtin.assert:
+            that:
+              - codex_tasks_installed_commands.results[0].stdout == "codex-tasks " + codex_tasks_source_version
+              - "'Usage: codex-tasks' in codex_tasks_installed_commands.results[1].stdout"
+
+        - name: Record the installed release
+          ansible.builtin.copy:
+            dest: "{{ codex_tasks_receipt }}"
+            mode: "0600"
+            content: |
+              {
+                "commit": "{{ codex_tasks_source_commit }}",
+                "version": "{{ codex_tasks_source_version }}",
+                "inventory_host": "{{ inventory_hostname }}",
+                "hostname": "{{ codex_tasks_actual_hostname.stdout }}",
+                "account": "{{ codex_tasks_actual_user.stdout }}"
+              }
+
+        - name: Remove the successful deployment transaction
+          ansible.builtin.file:
+            path: "{{ codex_tasks_transaction.path }}"
+            state: absent
+          changed_when: false
+
+      rescue:
+        - name: Inspect rollback executable
+          ansible.builtin.stat:
+            path: "{{ codex_tasks_transaction.path }}/previous-binary"
+          register: codex_tasks_rollback_binary
+
+        - name: Inspect rollback skill
+          ansible.builtin.stat:
+            path: "{{ codex_tasks_transaction.path }}/previous-skill"
+          register: codex_tasks_rollback_skill
+
+        - name: Remove failed executable before restoration
+          ansible.builtin.file:
+            path: "{{ codex_tasks_install_binary }}"
+            state: absent
+          when:
+            - codex_tasks_rollback_binary.stat.exists or not codex_tasks_previous_binary.stat.exists
+
+        - name: Restore the previous executable
+          ansible.builtin.command:
+            argv:
+              - mv
+              - --
+              - "{{ codex_tasks_transaction.path }}/previous-binary"
+              - "{{ codex_tasks_install_binary }}"
+          when: codex_tasks_rollback_binary.stat.exists
+
+        - name: Remove failed skill before restoration
+          ansible.builtin.file:
+            path: "{{ codex_tasks_install_skill }}"
+            state: absent
+          when:
+            - codex_tasks_rollback_skill.stat.exists or not codex_tasks_previous_skill.stat.exists
+
+        - name: Restore the previous skill
+          ansible.builtin.command:
+            argv:
+              - mv
+              - --
+              - "{{ codex_tasks_transaction.path }}/previous-skill"
+              - "{{ codex_tasks_install_skill }}"
+          when: codex_tasks_rollback_skill.stat.exists
+
+        - name: Stop after rollback
+          ansible.builtin.fail:
+            msg: >-
+              Deployment failed on {{ inventory_hostname }}. Managed paths were
+              rolled back where possible. The transaction remains at
+              {{ codex_tasks_transaction.path }} for inspection.

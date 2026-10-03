@@ -1,0 +1,2 @@
+[tools]
+"pipx:ansible-core" = "2.21.4"

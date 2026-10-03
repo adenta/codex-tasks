@@ -23,7 +23,7 @@ configuration, or writes the task index/history directly. Desktop-only task
 access and cross-host handoff still need native helpers. All task access, including
 `find`, uses the running stock app server; there are no direct database reads.
 
-The connection is **modal → local codex-tasks → stock Codex app server**. Remote
+The connection is **caller → local codex-tasks → stock Codex app server**. Remote
 targets use `ssh <alias> codex app-server proxy` to carry the stock WebSocket
 connection. No remote codex-tasks installation or private protocol is required.
 
@@ -34,19 +34,62 @@ Using your existing Go 1.23+ toolchain:
 ```sh
 git clone https://github.com/adenta/codex-tasks.git
 cd codex-tasks
-go build -trimpath -o build/codex-tasks ./cmd/codex-tasks
+make build
 ./build/codex-tasks --help
+./build/codex-tasks --version
 ```
 
 When ready to install, copy `build/codex-tasks` into an existing user bin directory
-on PATH on the computer invoking commands (the desktop for the modal). Remote
+on PATH on the computer invoking commands. Remote
 servers need stock Codex, not another copy of codex-tasks. Nothing installs
 automatically; no service or fleet tooling is included.
 `make dist` builds a local Linux archive and checksum without publishing it.
 
+The canonical version is in [`VERSION`](VERSION). This project follows Semantic
+Versioning for its documented CLI and JSON result contract; see
+[`CHANGELOG.md`](CHANGELOG.md). Direct `go build` invocations that do not inject
+the version report `codex-tasks development`.
+
 Optionally copy `skills/codex-tasks` into your Codex skills directory. The skill
 prefers native helpers and falls back to this utility for missing capabilities.
 Updating or removing the skill has no effect on the executable.
+
+## Deploy to the personal caller accounts
+
+This repository owns an optional Ansible playbook for the three accounts that
+invoke `codex-tasks`: XPS desktop (`andre`), XPS agent, and Grace agent. It
+installs the versioned executable and the matching companion skill as one release.
+It does not configure SSH, Codex authentication, app-server lifecycle, endpoint
+configuration, or task state.
+
+Install the pinned `ansible-core` dependency through Mise, then preview or apply
+the playbook from the Grace agent checkout:
+
+```sh
+mise install
+ansible-playbook deploy/codex-tasks.yml --limit grace --check --diff
+ansible-playbook deploy/codex-tasks.yml --limit grace
+ansible-playbook deploy/codex-tasks.yml --limit xps --check --diff
+ansible-playbook deploy/codex-tasks.yml --limit xps
+```
+
+`grace` and `xps` are inventory groups for the physical machines. Limiting to
+`xps` updates both XPS caller accounts; use `--limit xps-desktop` or
+`--limit xps-agent` for one account. With no limit, inventory order is XPS
+desktop, XPS agent, then Grace agent.
+
+The playbook refuses an uncommitted checkout, runs the Go tests, vet, and the
+isolated stock lifecycle test, then builds from the selected commit. Each target
+is identity-checked before mutation. Installation stages and verifies both
+artifacts before replacing live paths, records the commit under
+`~/.local/state/codex-tasks/deployments/current.json`, and restores the prior
+managed paths if post-installation verification fails. Preview mode performs the
+same source validation and tests but does not change target files.
+
+The checked-in inventory deliberately uses the existing `xps` SSH alias and a
+local Grace connection; it contains no addresses, private keys, or passwords.
+Running the all-machine deployment from another controller requires an equivalent
+`grace` SSH alias and changing `grace-agent` from a local to an SSH connection.
 
 ## Configure existing endpoints
 
@@ -83,8 +126,6 @@ codex-tasks find --query 'review permissions'
 codex-tasks projects --target server/agent
 codex-tasks read TASK_UUID --host server --limit 20
 codex-tasks create --host server --cwd /absolute/repo --mode plan --message-file brief.txt
-codex-tasks environments --host server --cwd /absolute/repo --json
-codex-tasks create --host server --cwd /absolute/repo --environment environment.toml --message-file brief.txt
 codex-tasks message TASK_UUID --host server --message-file follow-up.txt
 codex-tasks progress TASK_UUID --host server --wait 30s
 codex-tasks fork TASK_UUID --host server --title 'Follow-up review'
@@ -102,7 +143,7 @@ work without configuration, Codex, SSH, or network access. Use `--json` for scri
 text. Image paths are on the machine running the CLI, even for remote tasks:
 
 ```sh
-codex-tasks create --target local --projectless --image screenshot.png
+codex-tasks create --target local --cwd /absolute/workspace --projectless --image screenshot.png
 codex-tasks create --host server --cwd /absolute/repo --message-file brief.txt --image screenshot.png
 ```
 
@@ -114,7 +155,7 @@ is needed. No task submission is automatically retried.
 
 Copies live under `CODEX_HOME/codex-tasks/attachments` on the receiving account.
 Accepted and uncertain submissions retain their files; entries older than seven
-days are removed on subsequent attachment staging or clipboard capture, not by a
+days are removed on subsequent attachment staging, not by a
 background service. Known pre-submission failures clean up their copies when the
 destination is reachable. Caller-owned source files are never removed. Inspection
 of an uncertain task must precede any retry. CLI history text omits image content.
@@ -122,25 +163,22 @@ of an uncertain task must precede any retry. CLI history text omits image conten
 ## Results and recovery
 
 - Follow discovery and history cursors. An incomplete search is not proof of absence.
-  Search covers only tasks exposed by stock `thread/list` and exact `thread/read`.
+  General search matches titles and initial previews exposed by stock `thread/list`;
+  it is not full-history search. Exact task IDs use `thread/read`.
   Old database-search cursors must be discarded; restart without `--cursor`.
-- Activity and setup logs stay on the invoking computer. `setup_log_path` is local;
-  `worktree`, `workspace`, and `attachment_directory` identify destination paths.
 - Git task creation defaults to an isolated detached worktree from local
   `origin/HEAD`; use `--ref` for a selected ref or `--checkout` to use the checkout.
   Before starting the task, creation copies an ignored root `AGENTS.override.md`
   from the source checkout into the new worktree. Missing files and source
   symlinks are skipped; existing destination files are never overwritten. Copy
   failures stop creation and report the retained worktree for inspection. Other
-  ignored files and local environment setup scripts are not processed.
+  ignored files and local setup scripts are not processed.
   Forks inherit the source checkout; they do not copy uncommitted files.
 - `accepted` is input acceptance; `completed` is turn completion. Neither proves
   that the user's overall task is finished. Approvals and input requests stay in
   the task's Codex UI.
 - On `unknown` or `partial`, preserve returned task/project/worktree IDs and
   inspect history before retrying. Mutations are never automatically replayed.
-- Activity under `CODEX_HOME/codex-tasks` contains IDs/outcomes, not message bodies,
-  and is capped at two 5 MiB files. Logging warnings are not a reason to retry.
 
 Exit codes: **0** result returned (including incomplete discovery), **1** failed
 or partial operation, **2** invalid arguments/configuration, **3** uncertain
@@ -163,50 +201,50 @@ See [migration and validation notes](docs/migration.md). Extracted from
 [adenta/codex-ops](https://github.com/adenta/codex-ops), snapshot
 `ef47c97e74086501019f76671e140c9a5abaf3fa`.
 
-## Modal inference
+## Explicit inference settings
 
-New tasks selected from the launcher use the configured `modal` provider and
-Modal's endpoint hostname as the model ID. No routing preset is appended.
-Server default inherits the selected server's TOML model/provider. Subscription
-explicitly selects the OpenAI provider and the server's subscription model.
-The model and provider remain explicit when forking a task.
+Creation inherits the selected server's configured inference settings by default.
+`--model`, `--model-provider`, `--model-context-window`, and
+`--reasoning-effort` pass explicit values to an already-configured stock server;
+the CLI does not discover catalogs, configure providers, manage credentials, or
+fall back to a different provider. Requested model, provider, and reasoning
+settings are verified before an initial message is sent.
 
-On Grace, the configured provider points at a separate loopback HTTP proxy:
+`targets` prints only the local account and configured remote destinations as JSON
+without network access. The local entry includes `local: true` with its actual
+hostname/account. Every `create`, including `--projectless`, requires an explicit
+absolute `--cwd`.
 
-```toml
-[model_providers.modal]
-name = "Modal"
-base_url = "http://127.0.0.1:48765/v1"
-wire_api = "responses"
-requires_openai_auth = false
-supports_websockets = false
+Unversioned development builds previously wrote model caches, setup logs, and
+activity logs. Version 1.0.0 no longer reads or writes them and does not delete
+those existing files automatically.
+
+## Search by update time and archive batches
+
+```sh
+codex-tasks find --archived=false --updated-before 2026-10-01T12:00:00Z --json
+codex-tasks archive TASK_UUID OTHER_TASK_UUID --target server/agent
+codex-tasks unarchive TASK_UUID OTHER_TASK_UUID --target server/agent
+codex-tasks archive --tasks-file selected.json --json
 ```
 
-The proxy owns upstream credentials and reviewer alias translation. It is deployed
-separately; codex-tasks does not manage providers, services, credentials or billing.
-Existing tasks are not migrated or silently rerouted.
+`--updated-before` takes a standard RFC3339 timestamp with a timezone. It filters
+server-reported last update time, strictly before the cutoff; it does not derive
+age from IDs. Missing update times do not match. Search returns `createdAt` and
+`updatedAt` as Unix seconds and shows readable timestamps in English output.
+`--archived=false` means unarchived, regardless of whether a task is running.
 
-## Optional Omarchy popup
+Search is the preview. Follow its cursors with unchanged filters, check coverage,
+and collect the desired tasks into a JSON array before acting. A single discovery
+result is also accepted, but only its returned page is acted on. For example:
 
-`codex-tasks models --host grace --json` reads the selected stock server's
-configuration and retrieves the catalog from its configured local Modal proxy
-through command/exec. The desktop holds no Modal credentials. `--refresh` updates
-an account-scoped local catalog cache; server defaults are read afresh. A transport
-failure can return cached models with a warning, but cannot invent server defaults.
-Help works offline. Catalog requests never run inference.
-See `codex-tasks help models` for cache location and failure behavior.
+```json
+[{"id":"00000000-0000-4000-8000-000000000001","host":"server","account":"agent"}]
+```
 
-See [ui/omarchy](ui/omarchy/README.md) for a themed remote task composer and an
-Alt+Space binding. The CLI remains independent of Quickshell and Omarchy.
-`targets` prints the local account and configured remote destinations as JSON
-without network access. The local entry includes `local: true` with its actual
-hostname/account, and appears as `local` in the popup's target picker.
-`create --projectless` can omit `--cwd` to allocate a unique workspace under the
-executing account's Documents/Codex, with work/outputs and developer instructions.
-`create --wait-history --message-file -` waits up to ten seconds for readable
-accepted input before returning `history_ready: true`; this does not wait for
-inference completion.
-
-Modal models with advertised reasoning levels expose an Effort selector.
-Default preserves the server's configured behavior. `create --reasoning-effort`
-sets and verifies the selected value through the stock app-server interface.
+Use `--tasks-file -` for stdin. Each JSON task must retain its host/account; file
+input cannot be combined with IDs or global target selectors. Batches accept up to
+1000 distinct tasks and 1 MiB, deduplicate identities, and reuse one connection per
+target. Empty arrays succeed without connections. No mutation is retried; uncertain
+delivery stops that target and reports its remaining tasks as unattempted. Other
+targets continue. Inspect `results` and `summary` before choosing any retry.

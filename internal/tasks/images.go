@@ -1,16 +1,12 @@
 package tasks
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
 	"image"
 	_ "image/jpeg"
 	_ "image/png"
 	"io"
-	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -42,7 +38,7 @@ func newImageDir(p endpoints.Config, prefix string) (string, error) {
 	}
 	for _, entry := range entries {
 		name := entry.Name()
-		if !entry.IsDir() || !(strings.HasPrefix(name, "draft-") || strings.HasPrefix(name, "send-")) {
+		if !entry.IsDir() || !strings.HasPrefix(name, "send-") {
 			continue
 		}
 		if _, err := uuid.Parse(name[strings.IndexByte(name, '-')+1:]); err != nil {
@@ -160,188 +156,4 @@ func copyImage(src, dest string) error {
 		return fmt.Errorf("image exceeds 10 MiB")
 	}
 	return closeErr
-}
-
-func ownedImageDir(p endpoints.Config, dir, prefix string) bool {
-	if filepath.Dir(dir) != imageRoot(p) || !strings.HasPrefix(filepath.Base(dir), prefix) {
-		return false
-	}
-	_, err := uuid.Parse(strings.TrimPrefix(filepath.Base(dir), prefix))
-	return err == nil
-}
-
-func localImagePath(value string) string {
-	value = strings.TrimSpace(value)
-	if len(value) >= 2 && ((value[0] == '"' && value[len(value)-1] == '"') || (value[0] == '\'' && value[len(value)-1] == '\'')) {
-		value = value[1 : len(value)-1]
-	}
-	if strings.HasPrefix(value, "file:") {
-		u, err := url.Parse(value)
-		if err != nil || u.Scheme != "file" || (u.Host != "" && u.Host != "localhost") || u.RawQuery != "" || u.Fragment != "" {
-			return ""
-		}
-		value = u.Path
-	}
-	if strings.HasPrefix(value, "~/") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return ""
-		}
-		value = filepath.Join(home, value[2:])
-	}
-	if !filepath.IsAbs(value) || strings.ContainsAny(value, "\x00\r\n") {
-		return ""
-	}
-	return value
-}
-
-// Import a private copy so removing a draft never removes the selected file.
-func importImage(p endpoints.Config, value string, stdout io.Writer) error {
-	source := localImagePath(value)
-	if source == "" {
-		return fmt.Errorf("select a local image file")
-	}
-	_, ext, err := imageInfo(source)
-	if err != nil {
-		return err
-	}
-	dir, err := newImageDir(p, "draft-")
-	if err != nil {
-		return err
-	}
-	ok := false
-	defer func() {
-		if !ok {
-			_ = os.RemoveAll(dir)
-		}
-	}()
-	path := filepath.Join(dir, "image"+ext)
-	if err = copyImage(source, path); err != nil {
-		return err
-	}
-	if _, _, err = imageInfo(path); err != nil {
-		return err
-	}
-	err = json.NewEncoder(stdout).Encode(map[string]any{"image": true, "path": path, "url": (&url.URL{Scheme: "file", Path: path}).String()})
-	ok = err == nil
-	return err
-}
-
-func clipboardImage(ctx context.Context, p endpoints.Config, stdout io.Writer) error {
-	types := exec.CommandContext(ctx, "wl-paste", "--list-types")
-	var available limitedBuffer
-	types.Stdout = &available
-	if err := types.Run(); err != nil {
-		return fmt.Errorf("cannot read clipboard; wl-paste and a Wayland session are required")
-	}
-	mime := ""
-	for _, candidate := range []string{"image/png", "image/jpeg"} {
-		for _, line := range strings.Split(string(available.data), "\n") {
-			if line == candidate {
-				mime = candidate
-				break
-			}
-		}
-		if mime != "" {
-			break
-		}
-	}
-	if mime == "" {
-		for _, line := range strings.Split(string(available.data), "\n") {
-			if strings.HasPrefix(line, "image/") {
-				return fmt.Errorf("clipboard images must be PNG or JPEG")
-			}
-		}
-		for _, candidate := range []string{"text/uri-list", "text/plain;charset=utf-8", "text/plain", "UTF8_STRING"} {
-			if !strings.Contains("\n"+string(available.data)+"\n", "\n"+candidate+"\n") {
-				continue
-			}
-			cmd := exec.CommandContext(ctx, "wl-paste", "--no-newline", "--type", candidate)
-			var content limitedBuffer
-			cmd.Stdout = &content
-			if err := cmd.Run(); err != nil {
-				return fmt.Errorf("could not read clipboard text")
-			}
-			path := localImagePath(string(content.data))
-			ext := strings.ToLower(filepath.Ext(path))
-			if path != "" && (ext == ".png" || ext == ".jpg" || ext == ".jpeg") {
-				return importImage(p, path, stdout)
-			}
-			break
-		}
-		return json.NewEncoder(stdout).Encode(map[string]any{"image": false})
-	}
-	dir, err := newImageDir(p, "draft-")
-	if err != nil {
-		return err
-	}
-	ok := false
-	defer func() {
-		if !ok {
-			_ = os.RemoveAll(dir)
-		}
-	}()
-	ext := ".png"
-	if mime == "image/jpeg" {
-		ext = ".jpg"
-	}
-	path := filepath.Join(dir, "clipboard"+ext)
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
-	if err != nil {
-		return err
-	}
-	cmd := exec.CommandContext(ctx, "wl-paste", "--no-newline", "--type", mime)
-	cmd.Stdout = &imageWriter{w: file}
-	runErr := cmd.Run()
-	closeErr := file.Close()
-	if runErr != nil {
-		return fmt.Errorf("clipboard image could not be read (maximum 10 MiB)")
-	}
-	if closeErr != nil {
-		return closeErr
-	}
-	if _, _, err = imageInfo(path); err != nil {
-		return err
-	}
-	err = json.NewEncoder(stdout).Encode(map[string]any{"image": true, "path": path, "url": (&url.URL{Scheme: "file", Path: path}).String()})
-	ok = err == nil
-	return err
-}
-
-type imageWriter struct {
-	w io.Writer
-	n int
-}
-
-func (w *imageWriter) Write(b []byte) (int, error) {
-	if w.n+len(b) > maxImageBytes {
-		return 0, fmt.Errorf("image exceeds 10 MiB")
-	}
-	n, err := w.w.Write(b)
-	w.n += n
-	return n, err
-}
-
-func discardDrafts(p endpoints.Config, paths []string) error {
-	for _, path := range paths {
-		dir := filepath.Dir(path)
-		if !ownedImageDir(p, dir, "draft-") {
-			return fmt.Errorf("not a launcher draft")
-		}
-		if err := os.RemoveAll(dir); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// Bound clipboard utility output before interpreting it.
-type limitedBuffer struct{ data []byte }
-
-func (b *limitedBuffer) Write(p []byte) (int, error) {
-	if len(b.data)+len(p) > 8<<20 {
-		return 0, fmt.Errorf("utility output exceeds limit")
-	}
-	b.data = append(b.data, p...)
-	return len(p), nil
 }

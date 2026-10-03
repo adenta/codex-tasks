@@ -7,7 +7,7 @@ turn status are observations, separate from the command's `outcome`.
 | Field | Meaning |
 | --- | --- |
 | `action`, `host`, `account` | Requested command and executing endpoint (invoker for aggregate find) |
-| `operation_id` | Existing activity correlation ID; not a receipt or retry key |
+| `operation_id` | Client-generated idempotency/correlation ID; not a receipt or retry key |
 | `outcome` | `ok`, `found`, `ambiguous`, `not_found`, `incomplete`, `created`, `partial`, `accepted`, `started`, `completed`, `needs_attention`, `settings_updated`, `archived`, `unarchived`, `interrupted`, `failed`, or `unknown` |
 | `task`, `tasks` | Original `id`, `name`, `cwd`, `projectId`, `status`; find adds owning `host`, `account`, and `archived` |
 | `coverage` | Find sources: `target`, `status`, optional explanatory `detail` |
@@ -17,14 +17,10 @@ turn status are observations, separate from the command's `outcome`.
 | `omitted_items` | Scanned non-message items omitted from this page |
 | `item_found` | Present for targeted reads; false means not found in this scan, not necessarily absent from remaining pages |
 | `projects` | `id`, `name`, all `roots`; `unavailable` and `reason` when none is accessible on the executing account |
-| `environments`, `environment_git` | Environment discovery: filename `id`, display `name`, optional validation `error`; whether the project is Git |
-| `setup_status`, `setup_exit_code`, `setup_output` | Selected environment setup: `completed`, `failed`, `timed_out`, or `unknown`; exit code when known and readable captured diagnostic tail up to 8 KiB |
-| `setup_log_path` | Private invoking-computer setup log under `CODEX_HOME/codex-tasks/setup-logs`; 1 MiB capture per stream, 2 MiB file plus metadata, seven-day retention cleaned at next setup |
-| `created`, `input_accepted` | Known side effects, retained if subsequent setup/observation fails |
+| `created`, `input_accepted` | Known side effects, retained if a subsequent operation or observation fails |
 | `turn_id`, `turn_status`, `attention` | Turn observation and UI action needed |
 | `error_category`, `error` | Specific category and bounded explanation |
 | `worktree`, `project_id` | Known creation artifacts, including partial failures |
-| `activity_status` | Existing invoking-account log availability, independent of task outcome |
 
 Optional empty fields may be omitted. Task metadata uses upstream camelCase;
 codex-tasks result metadata uses snake_case. Clients should tolerate additional fields.
@@ -36,10 +32,8 @@ its Codex home during initialization. Stock `command/exec` verifies server
 host/account before mutation; mismatches stop the operation.
 
 Attachments use stock `fs/writeFile` with base64 file bytes after local validation.
-`attachment_directory` reports retained destination copies. Worktree/workspace
-paths are destination paths; setup logs and activity belong to the invoking
-computer. `_clipboard-image`, `_import-image`, and `_discard-images` remain local
-launcher helpers and do not require a running server.
+`attachment_directory` reports retained destination copies. Worktree paths are
+destination paths.
 
 Find coverage statuses are `complete`, `more`, and `unavailable`. Coverage describes
 only what the running server exposes. `found` does not imply complete coverage;
@@ -47,7 +41,8 @@ only what the running server exposes. `found` does not imply complete coverage;
 exists. Exact IDs use `thread/read`; archive membership is derived from its
 server-reported rollout path when present, otherwise explicit archive filters
 are resolved through `thread/list`. General search scans active and archived
-`thread/list` pages with client-side title/preview matching. A source scans at
+`thread/list` pages with client-side title and initial-preview matching. It does
+not search later history. A source scans at
 most 1000 entries per call. Limits remain per source (default 20, maximum 100).
 Pagination uses upstream opaque cursors and is a bounded observation, not a
 snapshot. Old database-search cursors are rejected: restart without `--cursor`.
@@ -63,30 +58,12 @@ against the same limit and character bound; reasoning stays omitted.
 Failure categories include `route_unavailable`, `unsupported_operation`,
 `transport_unavailable`, `destination_mismatch`,
 `server_rejected`, `transport_uncertain`, `observation_unavailable`, and
-`operation_failed`, `invalid_image`, `image_upload_failed`, and `environment_setup_failed`. Remote stderr is discarded; errors describe the connection or stock RPC rejection. Exit 0 means the command returned successfully
+`operation_failed`, `invalid_image`, and `image_upload_failed`. Local permission
+errors distinguish sandbox or OS access denial from a missing socket. Remote stderr
+is discarded; errors describe the connection or stock RPC rejection. Exit 0 means the command returned successfully
 (including incomplete discovery); 1 means failed/partial operation; 2 means
 invalid arguments; 3 means an uncertain mutation. Inspect side-effect flags and
 known IDs before retrying. No mutation is replayed automatically.
-
-## Modal model catalog
-
-`models --host HOST --json [--refresh]` uses the normal task result envelope and
-verified stock-server routing. It reports `default_model`, `default_provider`,
-`subscription_model`, `models`, `refreshed_at`, and optional `warning`.
-Catalog entries include ID, name, positive context length, advertised input
-modalities and reasoning efforts. Missing names use the ID; invalid and duplicate
-entries are skipped. Modal effort options become `reasoning.supported_efforts`.
-
-The selected server's configured loopback Modal proxy serves the catalog through
-stock command/exec. No credentials are read by the CLI. Catalog curl requests have
-a 15-second timeout and a 2 MiB command-output cap; cache decoding is limited to
-16 MiB. Cache files are scoped by host/account under
-`$XDG_CACHE_HOME/codex-tasks/modal-HOST-ACCOUNT.json` (default `~/.cache`).
-A valid catalog is reused until explicit refresh; server defaults are always read.
-Refresh failure preserves valid cached models with a warning. If the proxy is
-unavailable without a cache, server defaults remain usable with a warning.
-A disconnected server can return cached models with a warning but no defaults;
-identity mismatches remain errors. Catalog requests never run inference.
 
 ## Examples
 
@@ -128,4 +105,46 @@ active-turn races, approvals, and unavailable project roots.
 The packaged skill is reviewed against those scenarios and its command examples
 are parsed during tests. These checks do not establish model compliance with
 instructions; model-backed skill evaluations require separate authorization.
-Native desktop tools are outside the fake-SSH and codex-tasks activity coverage.
+Native desktop tools are outside the fake-SSH test coverage.
+
+## Timestamp discovery and batch actions (1.1)
+
+Task `createdAt` and `updatedAt` are optional upstream Unix timestamps in seconds.
+English output renders UTC RFC3339 timestamps. `find --updated-before TIMESTAMP`
+accepts an RFC3339 timestamp with timezone (including fractional seconds), compares
+strictly against server `updatedAt`, and excludes missing timestamps. It permits
+omitting `--query`; text and time filters combine when both are present.
+`--archived=false` selects unarchived tasks and `--archived=true` archived tasks;
+omission searches both. The existing `--archive` option remains supported but
+cannot be combined with `--archived`. Search cursors bind the normalized cutoff,
+text, archive filter, and source scope. Restart older-version cursors.
+
+`archive` and `unarchive` accept multiple positional IDs or task links on a single
+selected target. `--tasks-file FILE|-` instead reads a JSON task array or one find
+result's `tasks` array, with `id`, `host`, and `account` required per entry. Extra
+metadata is ignored. File input cannot be combined with IDs or target selectors.
+Limits are 1 MiB and 1000 distinct host/account/ID identities; duplicates collapse.
+An empty array succeeds without connections. Input and configured routes are
+validated before any mutation. The file represents an explicit selection, not an
+instruction to fetch additional pages or reapply search filters.
+
+Batch JSON retains the top-level result envelope and adds `results` (per-task
+results with original ID, host, account, outcome/error) and `summary` counts:
+`succeeded`, `failed`, `unknown`, `unattempted`. Top-level host/account identifies
+the invoker; per-task host/account identifies the mutation destination. Results are
+grouped by target in first-appearance order, preserving order within each target.
+Single positional-task commands keep their existing output contract.
+
+The client reuses a verified connection per target, performs actions sequentially,
+and gives each task 30 seconds. Archive refuses currently running tasks. Definitive
+rejections do not stop subsequent tasks. Uncertain delivery or a broken connection
+stops that target; remaining entries are `unattempted`, and other targets continue.
+No mutation is replayed. A failure before connection establishment leaves every
+entry for that target unattempted. Cancellation leaves remaining tasks unattempted.
+The server may also archive spawned descendants, as with single-task archive.
+
+Batch exit codes: 0 all succeeded (including empty input); 1 definitive failures or
+unattempted entries; 2 invalid input/configured routes before mutation; 3 any uncertain
+mutation. Aggregate outcome is `ok`, `partial` (successes plus failures/unattempted),
+`failed` (no successes), or `unknown` (any uncertain mutation). Inspect per-task
+results before retrying; an operation ID is not a retry key.

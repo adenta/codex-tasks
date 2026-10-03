@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -34,7 +35,6 @@ type rpcReply struct {
 }
 
 // RPCError distinguishes an explicit server rejection from an uncertain write.
-// The server's arbitrary error text is never put in the activity log.
 type RPCError struct {
 	Method  string
 	Code    int
@@ -69,10 +69,19 @@ type Client struct {
 	done           chan struct{}
 }
 
+func (c *Client) connectionFailed() bool {
+	select {
+	case <-c.done:
+		return true
+	default:
+		return false
+	}
+}
+
 func Dial(ctx context.Context, socket string) (*Client, error) {
 	info, err := os.Lstat(socket)
 	if err != nil {
-		return nil, fmt.Errorf("app-server control socket unavailable: %w", err)
+		return nil, localSocketError(err)
 	}
 	owner, ok := info.Sys().(*syscall.Stat_t)
 	if info.Mode()&os.ModeSocket == 0 || !ok || int(owner.Uid) != os.Getuid() {
@@ -89,7 +98,7 @@ func Dial(ctx context.Context, socket string) (*Client, error) {
 	}
 	if err != nil {
 		t.CloseIdleConnections()
-		return nil, fmt.Errorf("app-server control socket unavailable: %w", err)
+		return nil, localSocketError(err)
 	}
 	conn.SetReadLimit(16 << 20)
 	c := newClient()
@@ -97,6 +106,13 @@ func Dial(ctx context.Context, socket string) (*Client, error) {
 	c.writeMessage = func(ctx context.Context, b []byte) error { return conn.Write(ctx, websocket.MessageText, b) }
 	c.closeTransport = func() { _ = conn.CloseNow(); t.CloseIdleConnections() }
 	return c.initialize(ctx)
+}
+
+func localSocketError(err error) error {
+	if errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES) {
+		return fmt.Errorf("app-server control socket access blocked by sandbox or OS permissions: %w", err)
+	}
+	return fmt.Errorf("app-server control socket unavailable: %w", err)
 }
 
 func newClient() *Client {

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"time"
 )
 
 func render(w io.Writer, r Result, asJSON bool) {
@@ -11,39 +12,20 @@ func render(w io.Writer, r Result, asJSON bool) {
 		_ = json.NewEncoder(w).Encode(r)
 		return
 	}
-	if r.Action == "models" && r.Error == "" {
-		fmt.Fprintf(w, "Default: %s / %s\n", clean(r.DefaultProvider, 128), clean(r.DefaultModel, 512))
-		for _, m := range r.Models {
-			fmt.Fprintf(w, "%s\t%s\t%d\n", clean(m.ID, 512), clean(m.Name, 512), m.ContextLength)
+	if r.Summary != nil {
+		fmt.Fprintf(w, "Batch %s: %d succeeded, %d failed, %d uncertain, %d unattempted.\n", r.Action, r.Summary.Succeeded, r.Summary.Failed, r.Summary.Unknown, r.Summary.Unattempted)
+		for _, item := range r.Results {
+			fmt.Fprintf(w, "%s %s/%s: %s\n", clean(item.Task.ID, 100), clean(item.Host, 80), clean(item.Account, 80), clean(item.Outcome, 80))
+			if item.Error != "" {
+				fmt.Fprintln(w, clean(item.Error, 1200))
+			}
 		}
-		if r.Warning != "" {
-			fmt.Fprintln(w, r.Warning)
+		if r.Error != "" {
+			fmt.Fprintln(w, r.Error)
 		}
 		return
 	}
 	location := clean(r.Host, 80) + "/" + clean(r.Account, 80)
-	if r.Action == "environments" && r.Error == "" {
-		if len(r.Environments) == 0 {
-			fmt.Fprintln(w, "No environments found on", location)
-		}
-		for _, e := range r.Environments {
-			fmt.Fprintf(w, "%s\t%s", clean(e.ID, 200), clean(e.Name, 200))
-			if e.Error != "" {
-				fmt.Fprintf(w, "\tUnavailable: %s", clean(e.Error, 500))
-			}
-			fmt.Fprintln(w)
-		}
-		return
-	}
-	if r.SetupStatus != "" {
-		fmt.Fprintln(w, "Environment setup:", r.SetupStatus)
-	}
-	if r.SetupOutput != "" {
-		fmt.Fprintln(w, r.SetupOutput)
-	}
-	if r.SetupLogPath != "" {
-		fmt.Fprintln(w, "Setup log on this computer:", r.SetupLogPath)
-	}
 	if r.AttachmentDirectory != "" {
 		fmt.Fprintln(w, "Attachments on "+location+":", clean(r.AttachmentDirectory, 1000))
 	}
@@ -57,7 +39,7 @@ func render(w io.Writer, r Result, asJSON bool) {
 			fmt.Fprintln(w, "Multiple tasks match this search. Select a task ID and its target before acting.")
 		}
 	} else {
-		status := map[string]string{"ok": "Request completed", "created": "Task created", "partial": "Task created; setup is incomplete", "started": "The turn is running", "accepted": "Input accepted; consumption has not been confirmed", "completed": "The turn completed", "settings_updated": "Settings updated", "archived": "Task archived", "unarchived": "Task restored", "needs_attention": "The task needs your attention", "unknown": "The action's outcome is unknown; inspect the task before retrying", "failed": "The request failed", "interrupted": "The turn was interrupted"}[r.Outcome]
+		status := map[string]string{"ok": "Request completed", "created": "Task created", "partial": "Task created; a later step failed", "started": "The turn is running", "accepted": "Input accepted; consumption has not been confirmed", "completed": "The turn completed", "settings_updated": "Settings updated", "archived": "Task archived", "unarchived": "Task restored", "needs_attention": "The task needs your attention", "unknown": "The action's outcome is unknown; inspect the task before retrying", "failed": "The request failed", "interrupted": "The turn was interrupted"}[r.Outcome]
 		if status == "" {
 			status = "Task status: " + clean(r.Outcome, 80)
 		}
@@ -73,6 +55,12 @@ func render(w io.Writer, r Result, asJSON bool) {
 			name = "Untitled task"
 		}
 		fmt.Fprintf(w, "\n%s\nTask ID: %s\nTarget: %s\n", name, clean(t.ID, 100), target)
+		if t.CreatedAt != nil {
+			fmt.Fprintln(w, "Created:", time.Unix(*t.CreatedAt, 0).UTC().Format(time.RFC3339))
+		}
+		if t.UpdatedAt != nil {
+			fmt.Fprintln(w, "Updated:", time.Unix(*t.UpdatedAt, 0).UTC().Format(time.RFC3339))
+		}
 		if t.Status.Type != "" {
 			fmt.Fprintf(w, "Status: %s\n", clean(t.Status.Type, 80))
 		}
@@ -153,8 +141,8 @@ func render(w io.Writer, r Result, asJSON bool) {
 			fmt.Fprintln(w, "Input was accepted; inspect progress before sending it again.")
 		}
 		if r.Created {
-			fmt.Fprintln(w, "Task created; setup is incomplete.")
-			fmt.Fprintln(w, "Use the existing task ID above. Do not create a replacement merely because setup failed.")
+			fmt.Fprintln(w, "Task created; a later step failed.")
+			fmt.Fprintln(w, "Use the existing task ID above. Inspect it before creating a replacement.")
 		}
 		fmt.Fprintln(w, clean(r.Error, 1200))
 	}

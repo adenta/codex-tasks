@@ -13,41 +13,39 @@ import (
 	"strings"
 	"time"
 
-	"github.com/adenta/codex-tasks/internal/buildinfo"
-	"github.com/adenta/codex-tasks/internal/catalog"
 	"github.com/adenta/codex-tasks/internal/endpoints"
 	"github.com/google/uuid"
 )
 
 const maxMessage = 1 << 20
 const help = `Usage: codex-tasks OPERATION [TASK] [OPTIONS]
-  models [--host HOST | --target HOST/ACCOUNT] [--json] [--refresh]
-  environments --cwd DIRECTORY
-  find --query TEXT [--archive all|active|archived] [--limit N] [--cursor CURSOR]
+  find [--query TEXT] [--archived=true|false] [--updated-before TIMESTAMP]
+     [--limit N] [--cursor CURSOR]
   projects | list [--project ID] [--archived] [--limit N] [--cursor CURSOR]
   read TASK [--turn ID] [--limit N] [--cursor CURSOR]
        [--item ID --offset N] [--max-chars N] [--include-outputs]
   create --cwd DIRECTORY [--project ID | --projectless] [--checkout | --ref REF]
-         [--environment FILE.toml] [--title TITLE] [--model MODEL] [--model-provider PROVIDER] [--mode plan|default] [--message-file FILE|-] [--image FILE ...]
+         [--title TITLE] [--model MODEL] [--model-provider PROVIDER]
+         [--model-context-window TOKENS] [--reasoning-effort VALUE]
+         [--mode plan|default] [--message-file FILE|-] [--image FILE ...]
   fork TASK [--title TITLE] [--mode plan|default]
   message TASK [--message-file FILE|-] [--image FILE ...] [--wait DURATION]
   progress TASK [--turn ID] [--wait DURATION]
   mode TASK --mode plan|default
-  archive TASK | unarchive TASK
-  activity [--since DURATION] [--task ID] [--action NAME] [--outcome VALUE]
-           [--limit N] [--follow]
+  archive TASK [TASK ...] | unarchive TASK [TASK ...]
+  archive --tasks-file FILE|- | unarchive --tasks-file FILE|-
 Common: --target local|HOST/ACCOUNT or --host HOST; --json for scripts.
-Operation attribution: --source-task ID
 Defaults: English output; find searches inventory, other commands use the local account.
-20 results per source/page, no wait, 24h activity; --wait is at most 60s.
+20 results per source/page, no wait; --wait is at most 60s.
 Native desktop task tools remain necessary for desktop-only targets and handoff.
 `
 
 type Options struct {
-	Refresh         bool          `json:"refresh,omitempty"`
+	UpdatedBefore   string        `json:"updated_before,omitempty"`
+	TaskIDs         []string      `json:"task_ids,omitempty"`
+	BatchTasks      []Task        `json:"batch_tasks,omitempty"`
+	Batch           bool          `json:"batch,omitempty"`
 	ReasoningEffort string        `json:"reasoning_effort,omitempty"`
-	Environment     string        `json:"environment,omitempty"`
-	WaitHistory     bool          `json:"wait_history,omitempty"`
 	Target          string        `json:"target,omitempty"`
 	Query           string        `json:"query,omitempty"`
 	Archive         string        `json:"archive,omitempty"`
@@ -58,7 +56,6 @@ type Options struct {
 	Action          string        `json:"action"`
 	TaskID          string        `json:"task_id,omitempty"`
 	OperationID     string        `json:"operation_id"`
-	SourceTaskID    string        `json:"source_task_id,omitempty"`
 	Host            string        `json:"host,omitempty"`
 	Message         string        `json:"message,omitempty"`
 	Images          []string      `json:"images,omitempty"`
@@ -78,11 +75,6 @@ type Options struct {
 	TurnID          string        `json:"turn_id,omitempty"`
 	Wait            time.Duration `json:"wait,omitempty"`
 	JSON            bool          `json:"-"`
-	Since           time.Duration `json:"-"`
-	ActivityTask    string        `json:"-"`
-	ActivityAction  string        `json:"-"`
-	ActivityOutcome string        `json:"-"`
-	Follow          bool          `json:"-"`
 }
 
 func taskID(value string) (string, error) {
@@ -100,19 +92,17 @@ func parse(args []string, stdin io.Reader) (Options, error) {
 	o := Options{Action: args[0], OperationID: uuid.NewString()}
 	fs := flag.NewFlagSet("tasks "+o.Action, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	fs.BoolVar(&o.Refresh, "refresh", false, "refresh the selected server model catalog")
 	fs.StringVar(&o.Host, "host", "", "configured host")
 	fs.StringVar(&o.Target, "target", "", "local or host/account")
 	fs.StringVar(&o.Query, "query", "", "task link, ID, or title/preview words")
+	fs.StringVar(&o.UpdatedBefore, "updated-before", "", "last updated before an RFC3339 timestamp")
 	fs.StringVar(&o.Archive, "archive", "", "all, active, or archived")
 	fs.StringVar(&o.ItemID, "item", "", "read one history item")
 	fs.IntVar(&o.Offset, "offset", 0, "character offset within --item")
 	fs.IntVar(&o.MaxChars, "max-chars", 4000, "characters per history item")
 	fs.BoolVar(&o.IncludeOutputs, "include-outputs", false, "include diagnostic tool items")
 	fs.BoolVar(&o.JSON, "json", false, "JSON output")
-	fs.StringVar(&o.SourceTaskID, "source-task", os.Getenv("CODEX_THREAD_ID"), "source task UUID")
 	fs.StringVar(&o.CWD, "cwd", "", "workspace directory")
-	fs.StringVar(&o.Environment, "environment", "", "environment filename for new worktree setup")
 	fs.StringVar(&o.Project, "project", "", "project ID")
 	fs.StringVar(&o.Title, "title", "", "task title")
 	fs.StringVar(&o.Model, "model", "", "model override for new task")
@@ -122,19 +112,15 @@ func parse(args []string, stdin io.Reader) (Options, error) {
 	fs.StringVar(&o.Mode, "mode", "", "plan or default")
 	fs.StringVar(&o.Ref, "ref", "", "Git starting ref")
 	fs.BoolVar(&o.Checkout, "checkout", false, "use existing checkout")
-	fs.BoolVar(&o.WaitHistory, "wait-history", false, "wait up to 10s for accepted input in history")
 	fs.BoolVar(&o.Projectless, "projectless", false, "omit project assignment")
 	fs.BoolVar(&o.Archived, "archived", false, "list archived tasks")
 	fs.IntVar(&o.Limit, "limit", 20, "page size")
 	fs.StringVar(&o.Cursor, "cursor", "", "page cursor")
 	fs.StringVar(&o.TurnID, "turn", "", "turn UUID")
 	fs.DurationVar(&o.Wait, "wait", 0, "bounded progress wait")
-	fs.DurationVar(&o.Since, "since", 24*time.Hour, "activity window")
-	fs.StringVar(&o.ActivityTask, "task", "", "activity task filter")
-	fs.StringVar(&o.ActivityAction, "action", "", "activity operation filter")
-	fs.StringVar(&o.ActivityOutcome, "outcome", "", "activity outcome filter")
-	fs.BoolVar(&o.Follow, "follow", false, "follow activity")
 	var messageFile string
+	var tasksFile string
+	fs.StringVar(&tasksFile, "tasks-file", "", "JSON task array or discovery result; - for stdin")
 	fs.StringVar(&messageFile, "message-file", "", "file or - for stdin")
 	fs.Func("image", "local PNG/JPEG file (repeatable)", func(value string) error {
 		path, err := filepath.Abs(value)
@@ -144,27 +130,26 @@ func parse(args []string, stdin io.Reader) (Options, error) {
 		return err
 	})
 	tail := args[1:]
+	batchAction := o.Action == "archive" || o.Action == "unarchive"
 	// Accept the documented OPERATION TASK --flags form as well as flags first.
-	if len(tail) > 0 && !strings.HasPrefix(tail[0], "-") {
-		o.TaskID = tail[0]
+	for len(tail) > 0 && !strings.HasPrefix(tail[0], "-") {
+		o.TaskIDs = append(o.TaskIDs, tail[0])
 		tail = tail[1:]
 	}
 	if err := fs.Parse(tail); err != nil {
 		return o, err
 	}
-	if fs.NArg() > 0 {
-		if o.TaskID != "" || fs.NArg() != 1 {
-			return o, fmt.Errorf("expected one task ID")
-		}
-		o.TaskID = fs.Arg(0)
+	o.TaskIDs = append(o.TaskIDs, fs.Args()...)
+	if !batchAction && len(o.TaskIDs) > 1 {
+		return o, fmt.Errorf("expected one task ID")
+	}
+	if len(o.TaskIDs) == 1 {
+		o.TaskID = o.TaskIDs[0]
 	}
 	allowed := map[string]string{
-		"models":       "refresh",
-		"environments": "cwd",
-		"find":         "query archive limit cursor", "projects": "limit cursor", "list": "project archived limit cursor", "read": "turn limit cursor item offset max-chars include-outputs",
-		"create": "cwd project projectless checkout ref environment title model model-provider model-context-window reasoning-effort mode message-file image wait wait-history", "fork": "title mode",
-		"message": "message-file image wait", "progress": "turn wait", "mode": "mode", "archive": "", "unarchive": "",
-		"activity": "since task action outcome limit follow",
+		"find": "query archive archived updated-before limit cursor", "projects": "limit cursor", "list": "project archived limit cursor", "read": "turn limit cursor item offset max-chars include-outputs",
+		"create": "cwd project projectless checkout ref title model model-provider model-context-window reasoning-effort mode message-file image wait", "fork": "title mode",
+		"message": "message-file image wait", "progress": "turn wait", "mode": "mode", "archive": "tasks-file", "unarchive": "tasks-file",
 	}
 	names, ok := allowed[o.Action]
 	if !ok {
@@ -172,29 +157,68 @@ func parse(args []string, stdin io.Reader) (Options, error) {
 	}
 	var bad string
 	fs.Visit(func(f *flag.Flag) {
-		if !strings.Contains(" host target json source-task "+names+" ", " "+f.Name+" ") {
+		if !strings.Contains(" host target json "+names+" ", " "+f.Name+" ") {
 			bad = f.Name
 		}
 	})
 	if bad != "" {
 		return o, fmt.Errorf("--%s is not valid for %s", bad, o.Action)
 	}
-	if o.Action == "activity" && (o.Host != "" || o.Target != "") {
-		return o, fmt.Errorf("activity is stored on its originating host; run this command there through SSH")
-	}
-	if o.SourceTaskID != "" {
-		id, err := taskID(o.SourceTaskID)
-		if err != nil {
-			return o, fmt.Errorf("invalid source task ID")
+	if o.Action == "find" {
+		archivedSet, archiveSet := false, false
+		fs.Visit(func(f *flag.Flag) {
+			archivedSet = archivedSet || f.Name == "archived"
+			archiveSet = archiveSet || f.Name == "archive"
+		})
+		if archivedSet && archiveSet {
+			return o, fmt.Errorf("choose --archived or --archive, not both")
 		}
-		o.SourceTaskID = id
+		if archivedSet {
+			o.Archive = "active"
+			if o.Archived {
+				o.Archive = "archived"
+			}
+		}
 	}
-	if o.ActivityTask != "" {
-		id, err := taskID(o.ActivityTask)
+	if o.UpdatedBefore != "" {
+		cutoff, err := time.Parse(time.RFC3339Nano, o.UpdatedBefore)
+		if err != nil {
+			return o, fmt.Errorf("--updated-before requires an RFC3339 timestamp with timezone")
+		}
+		o.UpdatedBefore = cutoff.UTC().Format(time.RFC3339Nano)
+	}
+	if tasksFile != "" {
+		if len(o.TaskIDs) != 0 || o.Host != "" || o.Target != "" {
+			return o, fmt.Errorf("--tasks-file cannot be combined with task IDs or target selectors")
+		}
+		var reader io.Reader = stdin
+		if tasksFile != "-" {
+			f, err := os.Open(tasksFile)
+			if err != nil {
+				return o, err
+			}
+			defer f.Close()
+			reader = f
+		}
+		var err error
+		o.BatchTasks, err = readBatchTasks(reader)
 		if err != nil {
 			return o, err
 		}
-		o.ActivityTask = id
+		o.Batch = true
+	} else if batchAction && len(o.TaskIDs) > 1 {
+		o.Batch = true
+		for _, id := range o.TaskIDs {
+			o.BatchTasks = append(o.BatchTasks, Task{ID: id})
+		}
+	}
+	if o.Batch {
+		var err error
+		o.BatchTasks, err = normalizeBatch(o.BatchTasks, tasksFile != "")
+		if err != nil {
+			return o, err
+		}
+		o.TaskID = ""
 	}
 	if messageFile != "" {
 		var reader io.Reader = stdin
@@ -219,12 +243,6 @@ func parse(args []string, stdin io.Reader) (Options, error) {
 }
 
 func validate(o Options) error {
-	if o.Environment != "" && (o.Action != "create" || o.Checkout || !filepath.IsAbs(o.CWD) || !validEnvironmentID(o.Environment)) {
-		return fmt.Errorf("--environment requires create with an absolute --cwd, a .toml filename, and a new Git worktree")
-	}
-	if o.Action == "environments" && !filepath.IsAbs(o.CWD) {
-		return fmt.Errorf("environments requires --cwd with an absolute directory")
-	}
 	if len(o.Images) > maxImages || (len(o.Images) > 0 && o.Action != "create" && o.Action != "message") {
 		return fmt.Errorf("--image is supported by create/message only, up to 8 images")
 	}
@@ -243,8 +261,8 @@ func validate(o Options) error {
 			}
 		}
 	}
-	if o.Action == "find" && (strings.TrimSpace(o.Query) == "" || len(o.Query) > 1000) {
-		return fmt.Errorf("find requires --query with 1–1000 bytes")
+	if o.Action == "find" && ((strings.TrimSpace(o.Query) == "" && o.UpdatedBefore == "") || len(o.Query) > 1000) {
+		return fmt.Errorf("find requires --query with 1–1000 bytes or --updated-before")
 	}
 	if o.Archive != "" && o.Archive != "all" && o.Archive != "active" && o.Archive != "archived" {
 		return fmt.Errorf("archive must be all, active, or archived")
@@ -290,32 +308,24 @@ func validate(o Options) error {
 	if o.Checkout && o.Ref != "" {
 		return fmt.Errorf("choose --checkout or --ref")
 	}
-	if o.SourceTaskID != "" {
-		if _, err := taskID(o.SourceTaskID); err != nil {
-			return err
-		}
-	}
 	if o.TurnID != "" {
 		if _, err := uuid.Parse(o.TurnID); err != nil {
 			return fmt.Errorf("invalid turn UUID")
 		}
 	}
 	switch o.Action {
-	case "find", "projects", "list", "create", "activity", "environments", "models":
+	case "find", "projects", "list", "create":
 		if o.TaskID != "" {
 			return fmt.Errorf("%s does not accept a positional task ID", o.Action)
 		}
 	case "read", "fork", "message", "progress", "mode", "archive", "unarchive":
-		if _, err := taskID(o.TaskID); err != nil {
+		if _, err := taskID(o.TaskID); err != nil && !o.Batch {
 			return err
 		}
 	default:
 		return fmt.Errorf("unsupported task operation")
 	}
-	if o.WaitHistory && (o.Action != "create" || (strings.TrimSpace(o.Message) == "" && len(o.Images) == 0)) {
-		return fmt.Errorf("--wait-history requires create with text or images")
-	}
-	if o.Action == "create" && !(o.Projectless && o.CWD == "") && !filepath.IsAbs(o.CWD) {
+	if o.Action == "create" && !filepath.IsAbs(o.CWD) {
 		return fmt.Errorf("create requires --cwd with an absolute directory")
 	}
 	if o.Action == "message" && strings.TrimSpace(o.Message) == "" && len(o.Images) == 0 {
@@ -323,9 +333,6 @@ func validate(o Options) error {
 	}
 	if o.Action == "mode" && o.Mode == "" {
 		return fmt.Errorf("mode requires --mode plan|default")
-	}
-	if o.Action == "activity" && o.Since <= 0 {
-		return fmt.Errorf("since must be a positive duration")
 	}
 	return nil
 }
@@ -338,29 +345,6 @@ func Run(paths endpoints.Config, args []string, stdin io.Reader, stdout, stderr 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	if args[0] == "_clipboard-image" && len(args) == 1 {
-		ctx, done := context.WithTimeout(ctx, 10*time.Second)
-		defer done()
-		if err := clipboardImage(ctx, paths, stdout); err != nil {
-			fmt.Fprintln(stderr, err)
-			return 1
-		}
-		return 0
-	}
-	if args[0] == "_import-image" && len(args) == 2 {
-		if err := importImage(paths, args[1], stdout); err != nil {
-			fmt.Fprintln(stderr, err)
-			return 1
-		}
-		return 0
-	}
-	if args[0] == "_discard-images" {
-		if err := discardDrafts(paths, args[1:]); err != nil {
-			fmt.Fprintln(stderr, err)
-			return 1
-		}
-		return 0
-	}
 	if args[0] == "targets" {
 		if len(args) != 1 {
 			return 2
@@ -373,7 +357,7 @@ func Run(paths endpoints.Config, args []string, stdin io.Reader, stdout, stderr 
 		for i, t := range paths.Sources() {
 			targets = append(targets, listedTarget{Target: t, Local: i == 0})
 		}
-		_ = json.NewEncoder(stdout).Encode(map[string]any{"targets": targets, "desktop_projects": desktopProjects(paths)})
+		_ = json.NewEncoder(stdout).Encode(map[string]any{"targets": targets})
 		return 0
 	}
 	o, err := parse(args, stdin)
@@ -391,15 +375,14 @@ func Run(paths endpoints.Config, args []string, stdin io.Reader, stdout, stderr 
 		}
 		paths.CodexHome = home
 	}
-	if o.Action == "activity" {
-		return showActivity(ctx, paths, o, stdout, stderr)
-	}
 	return run(ctx, paths, o, stdout, stderr)
 }
 
 func run(ctx context.Context, paths endpoints.Config, o Options, stdout, stderr io.Writer) int {
+	if o.Batch {
+		return runBatch(ctx, paths, o, stdout, executeBatchAt)
+	}
 	o = localTarget(paths, o)
-	start := time.Now()
 	target := string(paths.Host)
 	if o.Host != "" {
 		target = strings.ToLower(o.Host)
@@ -407,15 +390,7 @@ func run(ctx context.Context, paths endpoints.Config, o Options, stdout, stderr 
 	if o.Target != "" {
 		target, _, _ = splitTarget(o.Target)
 	}
-	r := Result{OperationID: o.OperationID, Host: target, Account: paths.Account, Action: o.Action, Outcome: "ok", ActivityStatus: "ok"}
-	log := activityLog{home: paths.CodexHome}
-	e := Activity{Event: "task_operation_started", Timestamp: float64(start.UnixNano()) / 1e9, OperationID: o.OperationID, BuildID: buildinfo.BuildID, Action: o.Action, Host: string(paths.Host), Account: paths.Account, TargetHost: target, SourceTaskID: o.SourceTaskID, TaskID: o.TaskID, Outcome: "started"}
-	if e.SourceTaskID == "" {
-		e.SourceTaskID = "unknown"
-	}
-	// The event's started means command invocation, not target turn execution.
-	e.Outcome = "invoked"
-	logErr := log.append(e)
+	r := Result{OperationID: o.OperationID, Host: target, Account: paths.Account, Action: o.Action, Outcome: "ok"}
 	opCtx, cancel := context.WithTimeout(ctx, operationTimeout(o))
 	defer cancel()
 	var actionErr error
@@ -424,32 +399,7 @@ func run(ctx context.Context, paths endpoints.Config, o Options, stdout, stderr 
 	} else {
 		actionErr = executeAt(opCtx, paths, o, &r)
 	}
-	if o.Action == "models" && actionErr != nil && r.ErrorCategory == "transport_unavailable" {
-		if cached, err := catalog.ReadCache(modelCachePath(r.Host, r.Account)); err == nil {
-			r.Models = cached.Models
-			r.RefreshedAt = &cached.RefreshedAt
-			r.Warning = "Server unavailable; showing cached Modal models. Defaults unavailable."
-			actionErr = nil
-		}
-	}
 	setError(&r, actionErr)
-	e.Event, e.Timestamp, e.Outcome = "task_operation_outcome", float64(time.Now().UnixNano())/1e9, r.Outcome
-	e.TargetHost = r.Host
-	e.TargetAccount, e.ErrorCategory, e.DurationMS = r.Account, r.ErrorCategory, time.Since(start).Milliseconds()
-	e.InputAccepted = r.InputAccepted
-	if r.Task != nil {
-		e.TaskID = r.Task.ID
-	}
-	e.TurnID = r.TurnID
-	if err := log.append(e); err != nil {
-		logErr = err
-	}
-	if logErr != nil {
-		r.ActivityStatus = "unavailable"
-		fmt.Fprintln(stderr, "Warning: task activity could not be fully recorded.")
-	} else {
-		r.ActivityStatus = "ok"
-	}
 	render(stdout, r, o.JSON)
 	if r.Outcome == "unknown" {
 		return 3
@@ -478,67 +428,4 @@ func setError(r *Result, err error) {
 			r.ErrorCategory = "server_rejected"
 		}
 	}
-}
-
-func showActivity(ctx context.Context, p endpoints.Config, o Options, stdout, stderr io.Writer) int {
-	log := activityLog{home: p.CodexHome}
-	since := time.Now().Add(-o.Since)
-	seen := map[string]bool{}
-	first := true
-	lastStatus := ""
-	for {
-		limit := o.Limit
-		if o.Follow {
-			limit = 0
-		}
-		s, err := log.read(ActivityFilter{Since: since, Task: o.ActivityTask, Action: o.ActivityAction, Outcome: o.ActivityOutcome, Limit: limit})
-		if !o.Follow {
-			if o.JSON {
-				_ = json.NewEncoder(stdout).Encode(s)
-			} else {
-				fmt.Fprintf(stdout, "Task activity: %s · %d operations · %s\n", s.Status, s.Operations, s.Retention)
-				for _, e := range s.Events {
-					printActivity(stdout, e)
-				}
-			}
-		} else {
-			retained := map[string]bool{}
-			for i, e := range s.Events {
-				key := fmt.Sprintf("%s/%s/%f", e.OperationID, e.Event, e.Timestamp)
-				retained[key] = true
-				if seen[key] || (first && i < len(s.Events)-o.Limit) {
-					continue
-				}
-				if o.JSON {
-					_ = json.NewEncoder(stdout).Encode(e)
-				} else {
-					printActivity(stdout, e)
-				}
-			}
-			seen = retained // memory is bounded by the retained log files
-			first = false
-			if s.Status != "ok" && s.Status != lastStatus {
-				fmt.Fprintln(stderr, "Activity history is", s.Status)
-			}
-			lastStatus = s.Status
-		}
-		if err != nil {
-			fmt.Fprintln(stderr, err)
-			return 1
-		}
-		if !o.Follow {
-			if s.Status != "ok" {
-				return 1
-			}
-			return 0
-		}
-		select {
-		case <-ctx.Done():
-			return 0
-		case <-time.After(time.Second):
-		}
-	}
-}
-func printActivity(w io.Writer, e Activity) {
-	fmt.Fprintf(w, "%s  %s  %s  task=%s  operation=%s\n", time.UnixMilli(int64(e.Timestamp*1000)).Local().Format(time.RFC3339), e.Action, e.Outcome, e.TaskID, e.OperationID)
 }

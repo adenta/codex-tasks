@@ -171,21 +171,13 @@ args = ["-c", "printf fake-command-key"]
 	o := opts("create", "")
 	o.CWD = workspace
 	if remote {
-		// Exercise real remote creation with setup, while keeping scripts and
-		// inference entirely inside the disposable fixture.
+		// Exercise real remote worktree creation while keeping inference
+		// entirely inside the disposable fixture.
 		for _, args := range [][]string{{"init", "-b", "main"}, {"-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--allow-empty", "-m", "initial"}, {"symbolic-ref", "refs/remotes/origin/HEAD", "refs/heads/main"}} {
 			if _, err := git(ctx, workspace, args...); err != nil {
 				t.Fatal(err)
 			}
 		}
-		envDir := filepath.Join(workspace, ".codex", "environments")
-		if err := os.MkdirAll(envDir, 0700); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(envDir, "environment.toml"), []byte("version=1\n[setup]\nscript=\"printf ready > setup-ready; printf 'setup stdout\\\\n'; printf 'setup stderr\\\\n' >&2\"\n"), 0600); err != nil {
-			t.Fatal(err)
-		}
-		o.Environment = "environment.toml"
 	}
 	o.Title = "Persisted lifecycle fixture"
 	o.Mode = "plan"
@@ -201,14 +193,7 @@ args = ["-c", "printf fake-command-key"]
 		expectedEffort = "low"
 	}
 	o.Images = []string{testPNG(t, root)}
-	o.WaitHistory = true
 	o.Wait = 10 * time.Second
-	if remote {
-		// The launcher waits for readable history, not turn completion. Observe
-		// completion afterward: new Git rollouts may not yet have metadata
-		// immediately after turn/start accepts input.
-		o.Wait = 0
-	}
 	created := Result{Outcome: "ok"}
 	create := func() error {
 		if !remote {
@@ -238,9 +223,6 @@ args = ["-c", "printf fake-command-key"]
 		paths := endpoints.Config{Host: "fixture-client", Account: account.Username, CodexHome: localHome, Targets: []endpoints.Target{{Host: strings.ToLower(host), Account: account.Username, Alias: "fixture-server", Socket: socket}}}
 		o.Target = strings.ToLower(host) + "/" + account.Username
 		err = executeAt(ctx, paths, o, &created)
-		if created.SetupLogPath != "" && !strings.HasPrefix(created.SetupLogPath, localHome+"/") {
-			return fmt.Errorf("setup logs not on invoking computer")
-		}
 		return err
 	}
 
@@ -252,22 +234,8 @@ args = ["-c", "printf fake-command-key"]
 		client.Close()
 		t.Fatalf("project/title missing: %+v", created)
 	}
-	if !created.HistoryReady {
-		t.Fatal("image-only user history was not readable")
-	}
-	if remote {
-		if created.SetupStatus != "completed" || created.Worktree == "" {
-			t.Fatalf("missing environment setup: %+v", created)
-		}
-		if b, err := os.ReadFile(filepath.Join(created.Worktree, "setup-ready")); err != nil || string(b) != "ready" {
-			t.Fatalf("setup did not prepare task worktree: %s %v", b, err)
-		}
-		if b, err := os.ReadFile(created.SetupLogPath); err != nil || !strings.Contains(string(b), "setup stdout\n") || !strings.Contains(string(b), "setup stderr\n") || !strings.Contains(string(b), "Setup completed (exit 0)") {
-			t.Fatalf("setup log missing streamed output: %q %v", b, err)
-		}
-		if err := s.progress(ctx, Options{Wait: 10 * time.Second, TurnID: created.TurnID}, &created); err != nil {
-			t.Fatal(err)
-		}
+	if remote && created.Worktree == "" {
+		t.Fatalf("missing remote worktree: %+v", created)
 	}
 	// Completed ingestion must persist the image across cold resume even when
 	// the original local file no longer exists.
@@ -427,9 +395,11 @@ args = ["-c", "printf fake-command-key"]
 		}
 	}
 	for _, action := range []string{"archive", "unarchive"} {
-		r := Result{Outcome: "ok"}
-		if err := s.execute(ctx, opts(action, fork.Task.ID), &r); err != nil {
-			t.Fatalf("%s: %v", action, err)
+		batch := s.executeBatch(ctx, opts(action, ""), []Task{{ID: fork.Task.ID}, {ID: id}})
+		for _, result := range batch {
+			if result.Outcome != action+"d" {
+				t.Fatalf("stock batch %s: %+v", action, batch)
+			}
 		}
 		search := opts("find", "")
 		search.Query = "codex://threads/" + fork.Task.ID
@@ -439,6 +409,14 @@ args = ["-c", "printf fake-command-key"]
 			_ = s.call(ctx, "thread/list", map[string]any{"archived": action == "archive", "sourceKinds": allTaskSources, "modelProviders": []string{}, "useStateDbOnly": true}, &listed, false)
 			t.Logf("raw listing: %#v", listed)
 			t.Fatalf("find after %s: %+v %v", action, found, err)
+		}
+		if found.Tasks[0].UpdatedAt == nil || found.Tasks[0].CreatedAt == nil {
+			t.Fatalf("stock timestamps missing: %+v", found.Tasks[0])
+		}
+		search.UpdatedBefore = time.Unix(*found.Tasks[0].UpdatedAt, 0).UTC().Format(time.RFC3339)
+		filtered := Result{}
+		if err := s.execute(ctx, search, &filtered); err != nil || len(filtered.Tasks) != 0 {
+			t.Fatalf("stock cutoff boundary: %+v %v", filtered, err)
 		}
 
 	}
@@ -451,12 +429,8 @@ args = ["-c", "printf fake-command-key"]
 		t.Fatalf("CLI exit %d: %s %s", code, output.String(), stderr.String())
 	}
 	var result Result
-	if json.Unmarshal([]byte(output.String()), &result) != nil || result.Outcome != "completed" || result.ActivityStatus != "ok" {
+	if json.Unmarshal([]byte(output.String()), &result) != nil || result.Outcome != "completed" {
 		t.Fatalf("CLI result: %s", output.String())
-	}
-	activity, err := (activityLog{home: home}).read(ActivityFilter{Since: time.Now().Add(-time.Hour)})
-	if err != nil || activity.Operations != 1 || len(activity.Events) != 2 {
-		t.Fatalf("CLI activity: %+v %v", activity, err)
 	}
 	output.Reset()
 	stderr.Reset()
@@ -479,9 +453,7 @@ args = ["-c", "printf fake-command-key"]
 		t.Fatalf("closing sender stopped the task: %s", output.String())
 	}
 	blank := opts("create", "")
-	t.Setenv("HOME", root)
-	blank.CWD = ""
-	blank.WaitHistory = true
+	blank.CWD = workspace
 	blank.Projectless = true
 	blank.Title = "First-message projectless fixture"
 	blank.Model = "openai/gpt-5.6-sol"
